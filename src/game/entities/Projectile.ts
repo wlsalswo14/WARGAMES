@@ -57,7 +57,6 @@ export class Projectile {
     this.mesh.scale.z = attackMode === 'special' ? 2.8 : 4.2;
     this.mesh.position.copy(position);
     this.velocity = direction.normalize().multiplyScalar(weapon.projectileSpeed);
-    this.velocity.addScaledVector(source.velocity, 0.45);
   }
 
   update(delta: number): void {

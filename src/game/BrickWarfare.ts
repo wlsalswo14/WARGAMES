@@ -415,7 +415,7 @@ export class BrickWarfare {
     const forwardInput = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
     const sideInput = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const verticalInput = Number(this.input.isDown('Space'))
-      - Number(this.input.isDown('ControlLeft') || this.input.isDown('ControlRight'));
+      - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
     this.godAzimuth += rotateInput * delta * 1.25;
     const cameraForward = new Vector3(
@@ -424,7 +424,7 @@ export class BrickWarfare {
       Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
     ).normalize();
     const cameraRight = flatForward(this.godAzimuth + Math.PI / 2);
-    const boost = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight') ? 2.2 : 1;
+    const boost = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight') ? 2.2 : 1;
     const speed = this.godMoveSpeed * boost;
     this.godPosition.addScaledVector(cameraForward, forwardInput * speed * delta);
     this.godPosition.addScaledVector(cameraRight, sideInput * speed * delta);
@@ -443,7 +443,7 @@ export class BrickWarfare {
     const forward = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
     const side = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const up = Number(this.input.isDown('Space'))
-      - Number(this.input.isDown('ControlLeft') || this.input.isDown('ControlRight'));
+      - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
   }
 
@@ -494,8 +494,18 @@ export class BrickWarfare {
     } else {
       const distance = unit.kind === 'fighter' ? 18 : unit.kind === 'helicopter' ? 14 : unit.kind === 'tank' ? 10 : 7;
       const height = unit.kind === 'fighter' ? 5.5 : unit.kind === 'tank' ? 3.8 : 2.8;
+      const shoulderOffset = unit.kind === 'fighter'
+        ? 4.2
+        : unit.kind === 'helicopter'
+          ? 3.2
+          : unit.kind === 'tank'
+            ? 2.4
+            : unit.kind === 'drone'
+              ? 1.8
+              : 1.15;
       const desired = anchor.clone().addScaledVector(aimDirection, -distance);
       desired.y += height;
+      desired.addScaledVector(flatForward(this.aimYaw + Math.PI / 2), shoulderOffset);
       this.camera.position.lerp(desired, 1 - Math.exp(-delta * 10));
       this.camera.lookAt(anchor.clone().addScaledVector(aimDirection, 35));
     }
@@ -749,9 +759,7 @@ export class BrickWarfare {
         if (event.button === 2 && this.possessedUnit.kind === 'infantry') {
           return;
         }
-        const direction = new Vector3();
-        this.camera.getWorldDirection(direction);
-        const target = this.camera.position.clone().addScaledVector(direction, 1000);
+        const target = this.getCrosshairAimPoint();
         this.combat.fire(
           this.possessedUnit,
           target,
@@ -777,6 +785,26 @@ export class BrickWarfare {
       }
       this.selectUnit(this.pickUnit(event));
     }
+  }
+
+  private getCrosshairAimPoint(): Vector3 {
+    this.pointer.set(0, 0);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const possessedId = this.possessedUnit?.id;
+    const intersections = this.raycaster.intersectObjects([
+      ...this.world.terrainMeshes,
+      ...this.structures
+        .filter((structure) => !structure.destroyed)
+        .map((structure) => structure.root),
+      ...this.units
+        .filter((unit) => !unit.destroyed && unit.id !== possessedId)
+        .map((unit) => unit.root),
+    ], true);
+    return intersections[0]?.point.clone()
+      ?? this.raycaster.ray.origin.clone().addScaledVector(
+        this.raycaster.ray.direction,
+        1000,
+      );
   }
 
   private issueGodCommand(event: MouseEvent): void {

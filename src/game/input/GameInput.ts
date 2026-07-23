@@ -18,6 +18,8 @@ const CONTROL_KEYS = new Set([
   'ArrowLeft',
   'ArrowRight',
   'Space',
+  'ShiftLeft',
+  'ShiftRight',
   'ControlLeft',
   'ControlRight',
 ]);

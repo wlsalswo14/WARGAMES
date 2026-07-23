@@ -74,11 +74,6 @@ export class CombatSystem {
     this.projectiles.push(projectile);
     this.scene.add(projectile.mesh);
     unit.markFired(attackMode, weapon.reload);
-    this.createImpact(
-      position,
-      attackMode === 'special' ? 0xff7138 : 0xffefac,
-      attackMode === 'special' ? 1.1 : 0.28,
-    );
     return true;
   }
 
