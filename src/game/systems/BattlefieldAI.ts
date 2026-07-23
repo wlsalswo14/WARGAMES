@@ -5,7 +5,7 @@ import type { Unit } from '../entities/Unit';
 import type { Outpost } from '../entities/Outpost';
 import type { DiplomacySystem } from './DiplomacySystem';
 
-type Strategy = 'assault' | 'capture' | 'defend' | 'air-superiority' | 'entrench';
+export type Strategy = 'assault' | 'capture' | 'defend' | 'air-superiority' | 'entrench';
 
 interface CommanderState {
   strategy: Strategy;

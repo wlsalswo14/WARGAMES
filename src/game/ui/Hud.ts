@@ -46,6 +46,8 @@ export class Hud {
   private readonly callbacks: HudCallbacks;
   private activeDeploy: DeployKind | null = null;
   private currentFaction: FactionId = 'azure';
+  private currentMode: GameMode = 'god';
+  private pointerLocked = false;
   private killLogTimer = 0;
 
   constructor(container: HTMLElement, callbacks: HudCallbacks) {
@@ -86,8 +88,8 @@ export class Hud {
       </div>
       <div class="crosshair hidden"></div>
       <div class="controls controls-god">
-        <b>WASD</b> 이동 · <b>우클릭 드래그</b> 자유 회전 · <b>휠</b> 줌<br />
-        <b>가운데 드래그</b> 화면 이동 · <b>우클릭</b> 명령<br />
+        <b>화면 클릭</b> 마우스 고정 · <b>마우스 이동</b> 자유 회전 · <b>Esc</b> 해제<br />
+        <b>WASD</b> 화면 이동 · <b>휠</b> 줌 · <b>우클릭</b> 명령<br />
         <b>좌클릭</b> 선택/무한 배치 · <b>F</b> 진영 변경<br />
         <b>더블클릭/Enter</b> 선택 유닛 빙의
       </div>
@@ -184,14 +186,20 @@ export class Hud {
   }
 
   setMode(mode: GameMode): void {
+    this.currentMode = mode;
     const possessed = mode === 'possession';
     this.modeBadge.textContent = possessed ? 'POSSESSION' : 'GOD EYE';
     this.modeBadge.style.borderColor = possessed ? '#ffcf5d' : '#56b8ff';
     this.modeBadge.style.color = possessed ? '#ffe39c' : '#8bd1ff';
-    this.crosshair.classList.toggle('hidden', !possessed);
+    this.updateCrosshair();
     this.godControls.classList.toggle('hidden', possessed);
     this.possessionControls.classList.toggle('hidden', !possessed);
     this.deployDock.classList.toggle('hidden', possessed);
+  }
+
+  setPointerLocked(locked: boolean): void {
+    this.pointerLocked = locked;
+    this.updateCrosshair();
   }
 
   setFaction(faction: FactionId): void {
@@ -317,6 +325,11 @@ export class Hud {
       throw new Error(`HUD element missing: ${selector}`);
     }
     return element;
+  }
+
+  private updateCrosshair(): void {
+    const visible = this.currentMode === 'possession' || this.pointerLocked;
+    this.crosshair.classList.toggle('hidden', !visible);
   }
 
   private relationLabel(relation: Relation): string {
