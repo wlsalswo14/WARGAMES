@@ -86,13 +86,13 @@ export class Hud {
       </div>
       <div class="crosshair hidden"></div>
       <div class="controls controls-god">
-        <b>WASD</b> 이동 · <b>우클릭 드래그</b> 회전 · <b>휠</b> 줌<br />
+        <b>WASD</b> 이동 · <b>우클릭 드래그</b> 자유 회전 · <b>휠</b> 줌<br />
         <b>가운데 드래그</b> 화면 이동 · <b>우클릭</b> 명령<br />
         <b>좌클릭</b> 선택/무한 배치 · <b>F</b> 진영 변경<br />
         <b>더블클릭/Enter</b> 선택 유닛 빙의
       </div>
       <div class="controls controls-possession hidden">
-        <b>W/S</b> 전후 · <b>A/D</b> 좌우 · <b>마우스</b> 방향 전환<br />
+        <b>W/S</b> 전후 · <b>A</b> 오른쪽 · <b>D</b> 왼쪽 · <b>마우스</b> 방향 전환<br />
         <b>좌클릭</b> 사격 · <b>Space/Ctrl</b> 상승/하강<br />
         <b>V</b> 1·3인칭 · <b>G 또는 Esc</b> 신 모드 복귀
       </div>

@@ -32,13 +32,13 @@ export class CombatSystem {
   private readonly scene: Scene;
   private readonly onDestroyed: (event: CombatKillEvent) => void;
   private readonly onPossessedDamage: (damage: number) => void;
-  private readonly onExplosion: (position: Vector3, radius: number, intensity: number) => void;
+  private readonly onExplosion: (position: Vector3, radius: number) => void;
 
   constructor(
     scene: Scene,
     onDestroyed: (event: CombatKillEvent) => void,
     onPossessedDamage: (damage: number) => void,
-    onExplosion: (position: Vector3, radius: number, intensity: number) => void,
+    onExplosion: (position: Vector3, radius: number) => void,
   ) {
     this.scene = scene;
     this.onDestroyed = onDestroyed;
@@ -89,7 +89,6 @@ export class CombatSystem {
           this.onExplosion(
             projectile.mesh.position.clone(),
             Math.max(3.5, projectile.blastRadius),
-            projectile.damage,
           );
         }
       }
@@ -192,7 +191,6 @@ export class CombatSystem {
       this.onExplosion(
         projectile.mesh.position.clone(),
         Math.max(3, projectile.blastRadius + destroyedBricks * 0.18),
-        projectile.damage,
       );
       if (destroyedBricks >= 5) {
         this.explode(
@@ -219,7 +217,7 @@ export class CombatSystem {
     playerControlled: boolean,
   ): void {
     this.createImpact(position, 0xff712c, Math.max(1, radius * 0.55));
-    this.onExplosion(position.clone(), radius, damage);
+    this.onExplosion(position.clone(), radius);
     for (const unit of units) {
       if (unit.destroyed) {
         continue;

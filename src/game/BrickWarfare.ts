@@ -16,7 +16,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { FACTIONS, UNIT_STATS, WORLD } from './config';
+import { FACTIONS, WORLD } from './config';
 import { BrickStructure } from './entities/BrickStructure';
 import { Outpost } from './entities/Outpost';
 import { Unit } from './entities/Unit';
@@ -37,6 +37,16 @@ import { Hud } from './ui/Hud';
 import { BattlefieldWorld } from './world/BattlefieldWorld';
 
 const FACTION_ORDER: FactionId[] = ['azure', 'crimson', 'amber'];
+const TARGET_UNITS_PER_FACTION = 30;
+const INITIAL_FORCE: UnitKind[] = [
+  'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
+  'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
+  'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
+  'tank', 'tank', 'tank', 'tank', 'tank', 'tank', 'tank',
+  'drone', 'drone', 'drone', 'drone',
+  'helicopter', 'helicopter',
+  'fighter', 'fighter',
+];
 
 interface KillCamera {
   focus: Vector3;
@@ -139,7 +149,7 @@ export class BrickWarfare {
       this.scene,
       (event) => this.onUnitDestroyed(event),
       (damage) => this.hud.flashDamage(0.25 + damage * 2.4),
-      (position, radius, intensity) => this.onWorldExplosion(position, radius, intensity),
+      (position, radius) => this.onWorldExplosion(position, radius),
     );
     this.ai = new BattlefieldAI((faction, strategy, reason) => {
       this.hud.notify(
@@ -216,20 +226,10 @@ export class BrickWarfare {
       this.headquarters.set(faction, headquarters);
       this.scene.add(headquarters.root);
 
-      const spawnKinds: UnitKind[] = [
-        'infantry',
-        'infantry',
-        'infantry',
-        'infantry',
-        'tank',
-        'tank',
-        'drone',
-        'helicopter',
-        'fighter',
-      ];
-      spawnKinds.forEach((kind, index) => {
-        const angle = (index / spawnKinds.length) * Math.PI * 2;
-        const radius = kind === 'fighter' ? 42 : 18 + (index % 3) * 5;
+      INITIAL_FORCE.forEach((kind, index) => {
+        const group = Math.floor(index / 10);
+        const angle = ((index % 10) / 10) * Math.PI * 2 + group * 0.24;
+        const radius = kind === 'fighter' ? 54 + group * 7 : 20 + group * 13;
         const spawn = position.clone().add(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
         this.spawnUnit(kind, faction, spawn);
       });
@@ -331,7 +331,7 @@ export class BrickWarfare {
 
   private updateGodControls(delta: number): void {
     const forwardInput = Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS'));
-    const sideInput = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'));
+    const sideInput = Number(this.keys.has('KeyA')) - Number(this.keys.has('KeyD'));
     const rotateInput = Number(this.keys.has('KeyE')) - Number(this.keys.has('KeyQ'));
     this.godAzimuth += rotateInput * delta * 1.25;
     const cameraForward = flatForward(this.godAzimuth + Math.PI).normalize();
@@ -350,7 +350,7 @@ export class BrickWarfare {
       return;
     }
     const forward = Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS'));
-    const side = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'));
+    const side = Number(this.keys.has('KeyA')) - Number(this.keys.has('KeyD'));
     const up = Number(this.keys.has('Space')) - Number(this.keys.has('ControlLeft') || this.keys.has('ControlRight'));
     unit.yaw = this.aimYaw;
     if (unit.isAircraft) {
@@ -439,7 +439,7 @@ export class BrickWarfare {
       }
     }
     if (this.aiSpawnTimer <= 0) {
-      this.aiSpawnTimer = 7.5;
+      this.aiSpawnTimer = 5;
       for (const faction of FACTION_ORDER) {
         this.spawnAiReinforcement(faction);
       }
@@ -448,23 +448,7 @@ export class BrickWarfare {
 
   private spawnAiReinforcement(faction: FactionId): void {
     const alive = this.units.filter((unit) => unit.faction === faction && !unit.destroyed).length;
-    if (alive >= 16 || this.destroyedHeadquarters.has(faction)) {
-      return;
-    }
-    const strategy = this.ai.getStrategy(faction);
-    let kind: UnitKind = 'infantry';
-    const roll = Math.random();
-    if (strategy === 'air-superiority') {
-      kind = roll > 0.55 ? 'fighter' : 'drone';
-    } else if (strategy === 'assault') {
-      kind = roll > 0.42 ? 'tank' : 'infantry';
-    } else if (strategy === 'capture') {
-      kind = roll > 0.68 ? 'drone' : 'infantry';
-    } else if (roll > 0.82) {
-      kind = 'helicopter';
-    }
-    const balance = this.resources.get(faction) ?? 0;
-    if (balance < UNIT_STATS[kind].cost) {
+    if (alive >= TARGET_UNITS_PER_FACTION || this.destroyedHeadquarters.has(faction)) {
       return;
     }
     const spawnAnchor = this.outposts.find((outpost) => outpost.owner === faction)?.root.position
@@ -472,9 +456,25 @@ export class BrickWarfare {
     if (!spawnAnchor) {
       return;
     }
-    this.resources.set(faction, balance - UNIT_STATS[kind].cost);
-    const spawn = spawnAnchor.clone().add(new Vector3((Math.random() - 0.5) * 18, 0, (Math.random() - 0.5) * 18));
-    this.spawnUnit(kind, faction, spawn);
+    const strategy = this.ai.getStrategy(faction);
+    const missing = TARGET_UNITS_PER_FACTION - alive;
+    for (let index = 0; index < missing; index += 1) {
+      let kind: UnitKind = 'infantry';
+      const roll = Math.random();
+      if (strategy === 'air-superiority') {
+        kind = roll > 0.55 ? 'fighter' : 'drone';
+      } else if (strategy === 'assault') {
+        kind = roll > 0.42 ? 'tank' : 'infantry';
+      } else if (strategy === 'capture') {
+        kind = roll > 0.68 ? 'drone' : 'infantry';
+      } else if (roll > 0.82) {
+        kind = 'helicopter';
+      }
+      const angle = (index / Math.max(1, missing)) * Math.PI * 2;
+      const radius = 12 + (index % 3) * 5;
+      const spawn = spawnAnchor.clone().add(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+      this.spawnUnit(kind, faction, spawn);
+    }
   }
 
   private updateDiplomacy(delta: number): void {
@@ -579,8 +579,8 @@ export class BrickWarfare {
       if (this.mode !== 'god' || this.godDragButton === null) {
         return;
       }
-      const deltaX = event.clientX - this.godDragX;
-      const deltaY = event.clientY - this.godDragY;
+      const deltaX = event.movementX || event.clientX - this.godDragX;
+      const deltaY = event.movementY || event.clientY - this.godDragY;
       this.godDragX = event.clientX;
       this.godDragY = event.clientY;
       if (Math.abs(deltaX) + Math.abs(deltaY) > 1.5) {
@@ -876,7 +876,6 @@ export class BrickWarfare {
     this.onWorldExplosion(
       event.victim.position.clone(),
       event.victim.collisionRadius * 2.2 + 3,
-      event.victim.stats.maxHealth,
     );
 
     const playerDeath = event.victim === this.possessedUnit;
@@ -904,7 +903,7 @@ export class BrickWarfare {
     }
   }
 
-  private onWorldExplosion(position: Vector3, radius: number, intensity: number): void {
+  private onWorldExplosion(position: Vector3, radius: number): void {
     const trees = this.world.destroyTrees(position, Math.max(4, radius * 1.25));
     for (const tree of trees) {
       this.brickBursts.burstAt(
@@ -912,15 +911,6 @@ export class BrickWarfare {
         [0x3f2a1d, 0x68452a, 0x174f2b, 0x2e7b3f],
         Math.round(8 + tree.scale * 5),
         8 + tree.scale * 3,
-      );
-    }
-    if (intensity > 24) {
-      const count = Math.round(clamp(5 + intensity * 0.055, 6, 20));
-      this.brickBursts.burstAt(
-        position,
-        [0x5a6268, 0x7b7060, 0x343a3e, 0xd46a2f],
-        count,
-        clamp(7 + intensity * 0.025, 8, 14),
       );
     }
   }
