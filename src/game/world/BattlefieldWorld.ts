@@ -16,10 +16,13 @@ import {
 import { FACTIONS, WORLD } from '../config';
 import type { TerrainPalette } from '../battlefield/themes';
 import {
+  configureTerrainProfile,
   hash2,
+  riverCenterZ,
   sculptTerrain as addTerrainStamp,
   seededRandom,
   terrainHeight,
+  type TerrainProfile,
   type TerrainStampKind,
 } from '../math';
 import type { FactionId } from '../types';
@@ -86,7 +89,12 @@ export class BattlefieldWorld {
   private lastCenterX = Number.NaN;
   private lastCenterZ = Number.NaN;
 
-  constructor(palette: TerrainPalette) {
+  constructor(
+    palette: TerrainPalette,
+    private readonly treeDensity: number,
+    terrainProfile: TerrainProfile,
+  ) {
+    configureTerrainProfile(terrainProfile);
     this.lowColor = new Color(palette.low);
     this.highColor = new Color(palette.high);
     this.riverBankColor = new Color(palette.riverBank);
@@ -312,7 +320,7 @@ export class BattlefieldWorld {
       const worldX = centerX + positions.getX(index);
       const worldZ = centerZ + positions.getZ(index);
       const height = positions.getY(index);
-      const riverDistance = Math.abs(worldZ - Math.sin(worldX * 0.009) * 34);
+      const riverDistance = Math.abs(worldZ - riverCenterZ(worldX));
       const color = riverDistance < 16
         ? this.riverBankColor.clone()
         : this.lowColor.clone().lerp(
@@ -358,7 +366,10 @@ export class BattlefieldWorld {
     centerX: number,
     centerZ: number,
   ): { trunks: InstancedMesh; crowns: InstancedMesh; trees: TreeRecord[] } {
-    const count = 5 + Math.floor(hash2(chunkX, chunkZ, 81) * 10);
+    const count = Math.max(
+      1,
+      Math.round((5 + Math.floor(hash2(chunkX, chunkZ, 81) * 10)) * this.treeDensity),
+    );
     const trunkGeometry = new CylinderGeometry(0.35, 0.52, 3.3, 6);
     const crownGeometry = new ConeGeometry(1.9, 4.8, 7);
     const trunks = new InstancedMesh(trunkGeometry, this.trunkMaterial, count);
@@ -373,7 +384,7 @@ export class BattlefieldWorld {
       const localZ = (seededRandom(seed + 4) - 0.5) * (WORLD.chunkSize - 8);
       const worldX = centerX + localX;
       const worldZ = centerZ + localZ;
-      const riverDistance = Math.abs(worldZ - Math.sin(worldX * 0.009) * 34);
+      const riverDistance = Math.abs(worldZ - riverCenterZ(worldX));
       const townDistance = Math.hypot(worldX - 45, worldZ + 28);
       if (riverDistance < 23 || townDistance < 82) {
         continue;
@@ -421,7 +432,7 @@ export class BattlefieldWorld {
     const indices: number[] = [];
     for (let index = 0; index <= segments; index += 1) {
       const x = start + ((end - start) * index) / segments;
-      const centerZ = Math.sin(x * 0.009) * 34;
+      const centerZ = riverCenterZ(x);
       vertices.push(x, WORLD.waterLevel, centerZ - halfWidth);
       vertices.push(x, WORLD.waterLevel, centerZ + halfWidth);
       if (index < segments) {

@@ -1,7 +1,13 @@
-import type { TerrainStampKind } from '../math';
+import type { TerrainProfile, TerrainStampKind } from '../math';
 import type { TownBuildingLayout } from './layout';
 
-export type BattlefieldThemeId = 'mountains' | 'trenches' | 'urban';
+export type BattlefieldThemeId =
+  | 'mountains'
+  | 'trenches'
+  | 'urban'
+  | 'forest'
+  | 'canyon'
+  | 'riverlands';
 
 export interface TerrainPalette {
   low: number;
@@ -20,6 +26,8 @@ export interface BattlefieldTheme {
   label: string;
   description: string;
   palette: TerrainPalette;
+  terrainProfile: TerrainProfile;
+  treeDensity: number;
   terrainStamps: TerrainStampPlan[];
   buildings: TownBuildingLayout[];
 }
@@ -27,10 +35,18 @@ export interface BattlefieldTheme {
 export function createRandomBattlefieldTheme(): BattlefieldTheme {
   const seed = Math.floor(Math.random() * 0x7fffffff);
   const random = mulberry32(seed);
-  const ids: BattlefieldThemeId[] = ['mountains', 'trenches', 'urban'];
+  const ids: BattlefieldThemeId[] = [
+    'mountains',
+    'trenches',
+    'urban',
+    'forest',
+    'canyon',
+    'riverlands',
+  ];
   const id = ids[Math.floor(random() * ids.length)];
   const terrainStamps = createTerrainStamps(id, random);
   const buildings = createBuildings(id, random);
+  const terrainProfile = createTerrainProfile(id, random);
 
   if (id === 'mountains') {
     return {
@@ -38,6 +54,8 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       label: '산악 교전지',
       description: '높은 능선과 계곡 사이에서 거점과 고지를 두고 전투합니다.',
       palette: { low: 0x34463a, high: 0x727665, riverBank: 0x51493d },
+      terrainProfile,
+      treeDensity: 0.7,
       terrainStamps,
       buildings,
     };
@@ -48,15 +66,55 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       label: '참호 전선',
       description: '여러 겹의 참호선과 완만한 구릉이 전장을 가로지릅니다.',
       palette: { low: 0x4c4934, high: 0x777158, riverBank: 0x4a4032 },
+      terrainProfile,
+      treeDensity: 0.55,
+      terrainStamps,
+      buildings,
+    };
+  }
+  if (id === 'urban') {
+    return {
+      id,
+      label: '시가 전장',
+      description: '건물 밀집 구역과 도로 사이에서 근거리 교전이 벌어집니다.',
+      palette: { low: 0x3d4541, high: 0x69716b, riverBank: 0x4d4942 },
+      terrainProfile,
+      treeDensity: 0.35,
+      terrainStamps,
+      buildings,
+    };
+  }
+  if (id === 'forest') {
+    return {
+      id,
+      label: '삼림 고지',
+      description: '울창한 숲과 낮은 능선이 시야와 기갑 이동을 제한합니다.',
+      palette: { low: 0x233f2d, high: 0x58705a, riverBank: 0x4c4635 },
+      terrainProfile,
+      treeDensity: 2.1,
+      terrainStamps,
+      buildings,
+    };
+  }
+  if (id === 'canyon') {
+    return {
+      id,
+      label: '협곡 전선',
+      description: '건조한 협곡과 좁은 통로가 병력을 여러 전선으로 분리합니다.',
+      palette: { low: 0x5b4532, high: 0x8a7258, riverBank: 0x44392f },
+      terrainProfile,
+      treeDensity: 0.2,
       terrainStamps,
       buildings,
     };
   }
   return {
     id,
-    label: '시가 전장',
-    description: '건물 밀집 구역과 도로 사이에서 근거리 교전이 벌어집니다.',
-    palette: { low: 0x3d4541, high: 0x69716b, riverBank: 0x4d4942 },
+    label: '강변 교두보',
+    description: '굽이치는 넓은 강과 완만한 평야에서 교두보를 확보합니다.',
+    palette: { low: 0x344d3d, high: 0x67775d, riverBank: 0x625743 },
+    terrainProfile,
+    treeDensity: 1.25,
     terrainStamps,
     buildings,
   };
@@ -96,11 +154,50 @@ function createTerrainStamps(
     }
     return stamps;
   }
-  for (let index = 0; index < 5; index += 1) {
+  if (id === 'urban') {
+    for (let index = 0; index < 5; index += 1) {
+      stamps.push({
+        kind: index < 2 ? 'mountain' : 'trench',
+        x: randomRange(random, -180, 180),
+        z: randomRange(random, -145, 145),
+      });
+    }
+    return stamps;
+  }
+  if (id === 'forest') {
+    for (let index = 0; index < 8; index += 1) {
+      stamps.push({
+        kind: 'mountain',
+        x: randomRange(random, -220, 220),
+        z: randomRange(random, -175, 175),
+      });
+    }
+    return stamps;
+  }
+  if (id === 'canyon') {
+    for (let side = -1; side <= 1; side += 2) {
+      for (let index = 0; index < 7; index += 1) {
+        stamps.push({
+          kind: 'mountain',
+          x: -210 + index * 70 + randomRange(random, -12, 12),
+          z: side * (55 + Math.sin(index) * 24),
+        });
+      }
+    }
+    for (let index = 0; index < 8; index += 1) {
+      stamps.push({
+        kind: 'trench',
+        x: -175 + index * 50,
+        z: Math.sin(index * 1.2) * 22,
+      });
+    }
+    return stamps;
+  }
+  for (let index = 0; index < 4; index += 1) {
     stamps.push({
-      kind: index < 2 ? 'mountain' : 'trench',
-      x: randomRange(random, -180, 180),
-      z: randomRange(random, -145, 145),
+      kind: index === 0 ? 'mountain' : 'trench',
+      x: randomRange(random, -210, 210),
+      z: randomRange(random, -165, 165),
     });
   }
   return stamps;
@@ -110,7 +207,17 @@ function createBuildings(
   id: BattlefieldThemeId,
   random: () => number,
 ): TownBuildingLayout[] {
-  const targetCount = id === 'urban' ? 18 : id === 'trenches' ? 10 : 7;
+  const targetCount = id === 'urban'
+    ? 18
+    : id === 'trenches'
+      ? 10
+      : id === 'riverlands'
+        ? 12
+        : id === 'forest'
+          ? 6
+          : id === 'canyon'
+            ? 5
+            : 7;
   const buildings: TownBuildingLayout[] = [];
   let attempts = 0;
   while (buildings.length < targetCount && attempts < targetCount * 16) {
@@ -133,6 +240,36 @@ function createBuildings(
     });
   }
   return buildings;
+}
+
+function createTerrainProfile(
+  id: BattlefieldThemeId,
+  random: () => number,
+): TerrainProfile {
+  const heightScale = id === 'canyon'
+    ? 1.35
+    : id === 'mountains'
+      ? 1.18
+      : id === 'riverlands'
+        ? 0.58
+        : id === 'urban'
+          ? 0.68
+          : id === 'forest'
+            ? 0.9
+            : 0.78;
+  const riverAmplitude = id === 'riverlands'
+    ? randomRange(random, 58, 82)
+    : id === 'canyon'
+      ? randomRange(random, 16, 28)
+      : randomRange(random, 28, 48);
+  return {
+    phaseX: randomRange(random, -900, 900),
+    phaseZ: randomRange(random, -900, 900),
+    heightScale,
+    riverAmplitude,
+    riverFrequency: randomRange(random, 0.0065, 0.0125),
+    riverPhase: randomRange(random, 0, Math.PI * 2),
+  };
 }
 
 function randomRange(random: () => number, minimum: number, maximum: number): number {

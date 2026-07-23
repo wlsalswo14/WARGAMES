@@ -92,7 +92,7 @@ export class BattlefieldAI {
         }
         const preferredRange = unit.kind === 'tank' ? unit.stats.range * 0.62 : unit.stats.range * 0.42;
         if (distance > preferredRange) {
-          const destination = target.position.clone();
+          const destination = this.addFormationOffset(target.position.clone(), unit, 24);
           if (unit.isAircraft) {
             destination.y += unit.kind === 'fighter' ? 34 : 18;
           }
@@ -107,6 +107,7 @@ export class BattlefieldAI {
       const objective = this.findObjective(unit, outposts);
       if (objective) {
         this.scratch.copy(objective.root.position);
+        this.addFormationOffset(this.scratch, unit, 17);
         if (unit.isAircraft) {
           this.scratch.y += unit.kind === 'fighter' ? 30 : 15;
         }
@@ -206,19 +207,29 @@ export class BattlefieldAI {
 
   private findObjective(unit: Unit, outposts: Outpost[]): Outpost | null {
     const strategy = this.getStrategy(unit.faction);
-    let best: Outpost | null = null;
-    let bestScore = Number.POSITIVE_INFINITY;
-    for (const outpost of outposts) {
-      const distance = unit.position.distanceToSquared(outpost.root.position);
-      const ownershipMultiplier = outpost.owner === unit.faction
-        ? strategy === 'defend' || strategy === 'entrench' ? 0.6 : 4
-        : 1;
-      const score = distance * ownershipMultiplier;
-      if (score < bestScore) {
-        bestScore = score;
-        best = outpost;
-      }
+    const ranked = outposts
+      .map((outpost) => {
+        const distance = unit.position.distanceToSquared(outpost.root.position);
+        const ownershipMultiplier = outpost.owner === unit.faction
+          ? strategy === 'defend' || strategy === 'entrench' ? 0.6 : 4
+          : 1;
+        return { outpost, score: distance * ownershipMultiplier };
+      })
+      .sort((left, right) => left.score - right.score);
+    if (ranked.length === 0) {
+      return null;
     }
-    return best;
+    const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
+    const selectionWindow = Math.min(8, ranked.length);
+    return ranked[unitNumber % selectionWindow].outpost;
+  }
+
+  private addFormationOffset(destination: Vector3, unit: Unit, maximumRadius: number): Vector3 {
+    const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
+    const angle = unitNumber * Math.PI * (3 - Math.sqrt(5));
+    const radius = 4 + (unitNumber % 4) * ((maximumRadius - 4) / 3);
+    destination.x += Math.cos(angle) * radius;
+    destination.z += Math.sin(angle) * radius;
+    return destination;
   }
 }

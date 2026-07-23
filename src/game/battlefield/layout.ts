@@ -9,17 +9,23 @@ export interface OutpostLayout {
 }
 
 export const OUTPOST_LAYOUTS: OutpostLayout[] = [
-  { x: -235, z: -55, owner: 'azure' },
-  { x: -165, z: 82, owner: 'azure' },
-  { x: -142, z: -125, owner: null },
-  { x: -72, z: 35, owner: null },
+  { x: -252, z: -68, owner: 'azure' },
+  { x: -225, z: 78, owner: 'azure' },
+  { x: -176, z: -148, owner: 'azure' },
+  { x: -154, z: 8, owner: null },
+  { x: -104, z: 126, owner: null },
+  { x: -82, z: -92, owner: null },
+  { x: -8, z: -152, owner: null },
   { x: 0, z: 0, owner: null },
-  { x: 8, z: 142, owner: null },
-  { x: 76, z: -106, owner: null },
-  { x: 145, z: -142, owner: 'crimson' },
-  { x: 214, z: -84, owner: 'crimson' },
-  { x: 132, z: 82, owner: 'amber' },
-  { x: 228, z: 148, owner: 'amber' },
+  { x: 28, z: 152, owner: null },
+  { x: 82, z: -62, owner: null },
+  { x: 112, z: 72, owner: null },
+  { x: 148, z: -184, owner: 'crimson' },
+  { x: 212, z: -82, owner: 'crimson' },
+  { x: 252, z: -166, owner: 'crimson' },
+  { x: 164, z: 146, owner: 'amber' },
+  { x: 238, z: 72, owner: 'amber' },
+  { x: 252, z: 184, owner: 'amber' },
 ];
 
 export interface BaseLayout {
@@ -32,6 +38,24 @@ export const BASE_LAYOUTS: Record<FactionId, BaseLayout> = {
   azure: { x: -260, z: -25, yaw: Math.PI / 2 },
   crimson: { x: 235, z: -180, yaw: -0.7 },
   amber: { x: 245, z: 175, yaw: 3.7 },
+};
+
+export const STAGING_SPAWN_LAYOUTS: Record<FactionId, Array<{ x: number; z: number }>> = {
+  azure: [
+    { x: -292, z: -138 },
+    { x: -205, z: 152 },
+    { x: -118, z: -188 },
+  ],
+  crimson: [
+    { x: 302, z: -104 },
+    { x: 172, z: -246 },
+    { x: 104, z: -118 },
+  ],
+  amber: [
+    { x: 304, z: 112 },
+    { x: 182, z: 242 },
+    { x: 102, z: 108 },
+  ],
 };
 
 export interface TownBuildingLayout {

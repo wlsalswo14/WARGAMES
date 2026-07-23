@@ -13,10 +13,38 @@ interface TerrainStamp {
   strength: number;
 }
 
+export interface TerrainProfile {
+  phaseX: number;
+  phaseZ: number;
+  heightScale: number;
+  riverAmplitude: number;
+  riverFrequency: number;
+  riverPhase: number;
+}
+
 const terrainStamps: TerrainStamp[] = [];
+let terrainProfile: TerrainProfile = {
+  phaseX: 0,
+  phaseZ: 0,
+  heightScale: 1,
+  riverAmplitude: 34,
+  riverFrequency: 0.009,
+  riverPhase: 0,
+};
 
 export function resetTerrainStamps(): void {
   terrainStamps.length = 0;
+}
+
+export function configureTerrainProfile(profile: TerrainProfile): void {
+  terrainProfile = { ...profile };
+}
+
+export function riverCenterZ(x: number): number {
+  return Math.sin(
+    (x + terrainProfile.phaseX) * terrainProfile.riverFrequency
+      + terrainProfile.riverPhase,
+  ) * terrainProfile.riverAmplitude;
 }
 
 export function damp(current: number, target: number, lambda: number, delta: number): number {
@@ -33,10 +61,20 @@ export function hash2(x: number, y: number, seed = 1917): number {
 }
 
 export function terrainHeight(x: number, z: number): number {
-  const broad = Math.sin(x * 0.011) * 4.8 + Math.cos(z * 0.013) * 3.6;
-  const ridge = Math.sin((x * 0.006) + (z * 0.004)) * 2.2;
-  const detail = Math.sin((x + z) * 0.042) * 1.1 + Math.cos((x - z) * 0.035) * 0.85;
-  const river = Math.abs(z - Math.sin(x * 0.009) * 34);
+  const shiftedX = x + terrainProfile.phaseX;
+  const shiftedZ = z + terrainProfile.phaseZ;
+  const broad = (
+    Math.sin(shiftedX * 0.011) * 4.8
+      + Math.cos(shiftedZ * 0.013) * 3.6
+  ) * terrainProfile.heightScale;
+  const ridge = Math.sin((shiftedX * 0.006) + (shiftedZ * 0.004))
+    * 2.2
+    * terrainProfile.heightScale;
+  const detail = (
+    Math.sin((shiftedX + shiftedZ) * 0.042) * 1.1
+      + Math.cos((shiftedX - shiftedZ) * 0.035) * 0.85
+  ) * Math.min(1.2, terrainProfile.heightScale + 0.15);
+  const river = Math.abs(z - riverCenterZ(x));
   const riverCut = Math.max(0, 1 - river / 18) * 6.5;
   let height = broad + ridge + detail - riverCut;
   for (const stamp of terrainStamps) {

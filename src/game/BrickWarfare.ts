@@ -26,6 +26,7 @@ import {
   BASE_LAYOUTS,
   FACTION_ORDER,
   OUTPOST_LAYOUTS,
+  STAGING_SPAWN_LAYOUTS,
 } from './battlefield/layout';
 import {
   initialSpawnPosition,
@@ -77,7 +78,11 @@ export class BrickWarfare {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly battlefieldTheme = createRandomBattlefieldTheme();
-  private readonly world = new BattlefieldWorld(this.battlefieldTheme.palette);
+  private readonly world = new BattlefieldWorld(
+    this.battlefieldTheme.palette,
+    this.battlefieldTheme.treeDensity,
+    this.battlefieldTheme.terrainProfile,
+  );
   private readonly units: Unit[] = [];
   private readonly structures: BrickStructure[] = [];
   private readonly outposts: Outpost[] = [];
@@ -102,10 +107,10 @@ export class BrickWarfare {
   private possessedUnit: Unit | null = null;
   private deployKind: DeployKind | null = null;
   private simulationRunning = false;
-  private godTarget = new Vector3(0, 0, 0);
-  private godAzimuth = Math.PI * 0.18;
-  private godElevation = 0.79;
-  private godDistance = 210;
+  private godPosition = new Vector3(0, 92, 180);
+  private godAzimuth = Math.PI;
+  private godPitch = -0.46;
+  private godMoveSpeed = 58;
   private aimYaw = 0;
   private aimPitch = -0.08;
   private elapsed = 0;
@@ -192,7 +197,7 @@ export class BrickWarfare {
 
     this.createBattlefield();
     this.handleResize();
-    this.world.update(this.godTarget);
+    this.world.update(this.godPosition);
     this.updateDiplomacyHud();
     this.hud.setWind(this.world.wind.x, this.world.wind.z);
   }
@@ -256,11 +261,25 @@ export class BrickWarfare {
       this.headquarters.set(faction, headquarters);
       this.scene.add(headquarters.root);
 
-      const kindCounts = new Map<UnitKind, number>();
-      INITIAL_FORCE.forEach((kind) => {
-        const kindIndex = kindCounts.get(kind) ?? 0;
-        kindCounts.set(kind, kindIndex + 1);
-        const spawn = initialSpawnPosition(layout, kind, kindIndex);
+      const spawnAnchors = [
+        position,
+        ...this.outposts
+          .filter((outpost) => outpost.owner === faction)
+          .map((outpost) => outpost.root.position),
+        ...STAGING_SPAWN_LAYOUTS[faction].map(({ x, z }) => new Vector3(x, 0, z)),
+      ];
+      const zoneKindCounts = new Map<string, number>();
+      INITIAL_FORCE.forEach((kind, index) => {
+        const zoneIndex = kind === 'fighter' ? 0 : index % spawnAnchors.length;
+        const anchor = spawnAnchors[zoneIndex];
+        const countKey = `${zoneIndex}:${kind}`;
+        const kindIndex = zoneKindCounts.get(countKey) ?? 0;
+        zoneKindCounts.set(countKey, kindIndex + 1);
+        const spawn = initialSpawnPosition(
+          { x: anchor.x, z: anchor.z, yaw: layout.yaw },
+          kind,
+          kindIndex,
+        );
         this.spawnUnit(kind, faction, spawn);
       });
     }
@@ -298,7 +317,11 @@ export class BrickWarfare {
       this.updateKillCamera(delta);
     }
     this.updateCamera(delta);
-    this.world.update(this.mode === 'possession' && this.possessedUnit ? this.possessedUnit.position : this.godTarget);
+    this.world.update(
+      this.mode === 'possession' && this.possessedUnit
+        ? this.possessedUnit.position
+        : this.godPosition,
+    );
     this.updateHud(delta);
     this.renderer.render(this.scene, this.camera);
   }
@@ -354,16 +377,25 @@ export class BrickWarfare {
   private updateGodControls(delta: number): void {
     const forwardInput = Number(this.input.isDown('KeyW')) - Number(this.input.isDown('KeyS'));
     const sideInput = Number(this.input.isDown('KeyA')) - Number(this.input.isDown('KeyD'));
+    const verticalInput = Number(this.input.isDown('Space'))
+      - Number(this.input.isDown('ControlLeft') || this.input.isDown('ControlRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
     this.godAzimuth += rotateInput * delta * 1.25;
-    const cameraForward = flatForward(this.godAzimuth + Math.PI).normalize();
-    const cameraRight = new Vector3(cameraForward.z, 0, -cameraForward.x);
-    const speed = 62 + this.godDistance * 0.27;
-    this.godTarget.addScaledVector(cameraForward, forwardInput * speed * delta);
-    this.godTarget.addScaledVector(cameraRight, sideInput * speed * delta);
-    this.godTarget.x = clamp(this.godTarget.x, -680, 680);
-    this.godTarget.z = clamp(this.godTarget.z, -680, 680);
-    this.godTarget.y = terrainHeight(this.godTarget.x, this.godTarget.z);
+    const cameraForward = new Vector3(
+      Math.sin(this.godAzimuth) * Math.cos(this.godPitch),
+      Math.sin(this.godPitch),
+      Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
+    ).normalize();
+    const cameraRight = flatForward(this.godAzimuth + Math.PI / 2);
+    const boost = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight') ? 2.2 : 1;
+    const speed = this.godMoveSpeed * boost;
+    this.godPosition.addScaledVector(cameraForward, forwardInput * speed * delta);
+    this.godPosition.addScaledVector(cameraRight, sideInput * speed * delta);
+    this.godPosition.y += verticalInput * speed * delta;
+    this.godPosition.x = clamp(this.godPosition.x, -680, 680);
+    this.godPosition.z = clamp(this.godPosition.z, -680, 680);
+    const minimumHeight = terrainHeight(this.godPosition.x, this.godPosition.z) + 3;
+    this.godPosition.y = clamp(this.godPosition.y, minimumHeight, 340);
   }
 
   private updatePossessedControls(delta: number): void {
@@ -403,14 +435,13 @@ export class BrickWarfare {
       return;
     }
     if (this.mode === 'god') {
-      const horizontal = Math.cos(this.godElevation) * this.godDistance;
-      const desired = this.godTarget.clone().add(new Vector3(
-        Math.sin(this.godAzimuth) * horizontal,
-        Math.sin(this.godElevation) * this.godDistance,
-        Math.cos(this.godAzimuth) * horizontal,
-      ));
-      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 8));
-      this.camera.lookAt(this.godTarget);
+      const lookDirection = new Vector3(
+        Math.sin(this.godAzimuth) * Math.cos(this.godPitch),
+        Math.sin(this.godPitch),
+        Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
+      ).normalize();
+      this.camera.position.lerp(this.godPosition, 1 - Math.exp(-delta * 14));
+      this.camera.lookAt(this.camera.position.clone().addScaledVector(lookDirection, 120));
       return;
     }
     const unit = this.possessedUnit;
@@ -619,7 +650,7 @@ export class BrickWarfare {
       return;
     }
     this.godAzimuth += movementX * 0.0023;
-    this.godElevation = clamp(this.godElevation - movementY * 0.0019, 0.34, 1.22);
+    this.godPitch = clamp(this.godPitch + movementY * 0.0019, -1.3, 1.1);
   }
 
   private handlePointerLockChange(locked: boolean): void {
@@ -631,7 +662,7 @@ export class BrickWarfare {
 
   private handleWheel(deltaY: number): void {
     if (this.mode === 'god') {
-      this.godDistance = clamp(this.godDistance + deltaY * 0.13, 45, 360);
+      this.godMoveSpeed = clamp(this.godMoveSpeed - deltaY * 0.055, 24, 140);
     }
   }
 
@@ -767,8 +798,10 @@ export class BrickWarfare {
     if (!this.possessedUnit) {
       return;
     }
-    this.godTarget.copy(this.possessedUnit.position);
-    this.godTarget.y = terrainHeight(this.godTarget.x, this.godTarget.z);
+    this.godPosition.copy(this.possessedUnit.position);
+    this.godPosition.y += 18;
+    this.godAzimuth = this.possessedUnit.yaw + Math.PI;
+    this.godPitch = -0.32;
     this.possessedUnit.setPossessed(false);
     this.possessedUnit = null;
     this.mode = 'god';
@@ -788,7 +821,6 @@ export class BrickWarfare {
     }
     if (kind === 'mountain' || kind === 'trench') {
       this.world.sculptTerrain(point, kind);
-      this.godTarget.y = terrainHeight(this.godTarget.x, this.godTarget.z);
       this.hud.notify(
         kind === 'mountain' ? '산악 지형 생성' : '참호 지형 굴착',
         kind === 'mountain'
