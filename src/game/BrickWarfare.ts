@@ -268,7 +268,7 @@ export class BrickWarfare {
       );
       const headquarters = new BrickStructure(
         position,
-        { width: 8, height: 8, depth: 7 },
+        { width: 10, height: 14, depth: 8 },
         FACTIONS[faction].color,
         true,
         faction,
@@ -304,7 +304,19 @@ export class BrickWarfare {
     for (const building of this.battlefieldTheme.buildings) {
       const position = new Vector3(building.x, terrainHeight(building.x, building.z), building.z);
       const structure = new BrickStructure(position, building, building.color, true);
-      structure.root.rotation.y = (building.x * 0.13) % 0.45;
+      structure.root.rotation.y = (building.x * 0.13 + building.z * 0.07) % Math.PI;
+      this.structures.push(structure);
+      this.scene.add(structure.root);
+    }
+    for (const wall of this.battlefieldTheme.walls) {
+      const position = new Vector3(wall.x, terrainHeight(wall.x, wall.z), wall.z);
+      const structure = new BrickStructure(
+        position,
+        { width: wall.length, height: wall.height, depth: 1 },
+        wall.color,
+        false,
+      );
+      structure.root.rotation.y = wall.yaw;
       this.structures.push(structure);
       this.scene.add(structure.root);
     }
@@ -344,6 +356,11 @@ export class BrickWarfare {
   }
 
   private updateSimulation(delta: number): void {
+    for (const unit of this.units) {
+      if (!unit.destroyed) {
+        unit.beginSimulationStep();
+      }
+    }
     if (!this.killCamera && this.mode === 'possession' && this.possessedUnit && !this.possessedUnit.destroyed) {
       this.updatePossessedControls(delta);
     } else if (!this.killCamera && this.mode === 'god') {
@@ -373,6 +390,7 @@ export class BrickWarfare {
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
     }
+    this.resolveStructureCollisions();
     this.checkAircraftCollisions();
     for (const unit of this.units) {
       if (unit.destroyed && !this.explodedUnitIds.has(unit.id)) {
@@ -464,15 +482,6 @@ export class BrickWarfare {
         continue;
       }
       if (
-        this.structures.some(
-          (structure) => !structure.destroyed
-            && structure.containsWorldPoint(unit.position, unit.collisionRadius * 0.72),
-        )
-      ) {
-        this.crashedAircraft.add(unit);
-        continue;
-      }
-      if (
         this.outposts.some((outpost) => {
           const distanceX = unit.position.x - outpost.root.position.x;
           const distanceZ = unit.position.z - outpost.root.position.z;
@@ -498,6 +507,58 @@ export class BrickWarfare {
     for (const unit of this.crashedAircraft) {
       unit.applyRawDamage(unit.health, unit.faction);
     }
+  }
+
+  private resolveStructureCollisions(): void {
+    for (const unit of this.units) {
+      if (unit.destroyed) {
+        continue;
+      }
+      const padding = unit.collisionRadius * (unit.isAircraft ? 0.62 : 0.72);
+      if (!this.collidesWithStructure(unit.previousPosition, unit.position, padding)) {
+        continue;
+      }
+      if (unit.kind === 'fighter' || unit.kind === 'helicopter') {
+        unit.applyRawDamage(unit.health, unit.faction);
+        continue;
+      }
+      const attemptedPosition = unit.position.clone();
+      const xMovement = unit.previousPosition.clone().setX(attemptedPosition.x);
+      xMovement.y = attemptedPosition.y;
+      const zMovement = unit.previousPosition.clone().setZ(attemptedPosition.z);
+      zMovement.y = attemptedPosition.y;
+      const verticalMovement = unit.previousPosition.clone().setY(attemptedPosition.y);
+      if (!this.collidesWithStructure(unit.previousPosition, xMovement, padding)) {
+        unit.position.copy(xMovement);
+      } else if (!this.collidesWithStructure(unit.previousPosition, zMovement, padding)) {
+        unit.position.copy(zMovement);
+      } else if (
+        unit.isAircraft
+        && !this.collidesWithStructure(unit.previousPosition, verticalMovement, padding)
+      ) {
+        unit.position.copy(verticalMovement);
+      } else {
+        unit.position.copy(unit.previousPosition);
+      }
+      unit.stopMovement();
+    }
+  }
+
+  private collidesWithStructure(from: Vector3, to: Vector3, padding: number): boolean {
+    const travelDistance = from.distanceTo(to);
+    for (const structure of this.structures) {
+      if (structure.destroyed) {
+        continue;
+      }
+      const broadRadius = structure.collisionRadius + padding + travelDistance;
+      if (from.distanceToSquared(structure.root.position) > broadRadius * broadRadius) {
+        continue;
+      }
+      if (structure.intersectsWorldSegment(from, to, padding)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private inputAxis(
@@ -1038,9 +1099,9 @@ export class BrickWarfare {
       return;
     }
     if (kind === 'building') {
-      const width = 5 + Math.floor(Math.random() * 4);
-      const height = 5 + Math.floor(Math.random() * 6);
-      const depth = 4 + Math.floor(Math.random() * 3);
+      const width = 6 + Math.floor(Math.random() * 5);
+      const height = 15 + Math.floor(Math.random() * 14);
+      const depth = 5 + Math.floor(Math.random() * 5);
       const palette = [0x6f7778, 0x827668, 0x6d7367, 0x817069];
       const structure = new BrickStructure(
         new Vector3(point.x, terrainHeight(point.x, point.z), point.z),
@@ -1057,7 +1118,7 @@ export class BrickWarfare {
     if (kind === 'wall') {
       const structure = new BrickStructure(
         point,
-        { width: 6, height: 4, depth: 1 },
+        { width: 20, height: 6, depth: 1 },
         FACTIONS[this.activeFaction].color,
         false,
         this.activeFaction,

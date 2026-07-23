@@ -30,6 +30,7 @@ interface RubblePiece {
 }
 
 let nextStructureId = 1;
+const COLLISION_AXES = ['x', 'y', 'z'] as const;
 
 export class BrickStructure {
   readonly id = `structure-${nextStructureId++}`;
@@ -37,6 +38,7 @@ export class BrickStructure {
   readonly bricks: BrickPiece[] = [];
   readonly rubble: RubblePiece[] = [];
   readonly faction: FactionId | null;
+  readonly collisionRadius: number;
   destroyed = false;
   private aliveBrickCount = 0;
   private supportTotal = 0;
@@ -44,6 +46,8 @@ export class BrickStructure {
   private collapseTriggered = false;
   private readonly localBounds = new Box3();
   private readonly hiddenMatrix = new Matrix4();
+  private readonly collisionStart = new Vector3();
+  private readonly collisionEnd = new Vector3();
 
   constructor(
     position: Vector3,
@@ -71,14 +75,22 @@ export class BrickStructure {
       for (let x = 0; x < dimensions.width; x += 1) {
         for (let z = 0; z < dimensions.depth; z += 1) {
           const perimeter = x === 0 || x === dimensions.width - 1 || z === 0 || z === dimensions.depth - 1;
-          if (openCenter && !perimeter) {
+          const roof = openCenter && level === dimensions.height - 1;
+          if (openCenter && !perimeter && !roof) {
             continue;
           }
           const isDoor = z === dimensions.depth - 1
             && x >= Math.floor(dimensions.width / 2) - 1
             && x <= Math.floor(dimensions.width / 2)
-            && level < 3;
-          const isWindow = perimeter && level >= 3 && level <= 4 && (x + z) % 3 === 1;
+            && level < 4;
+          const floorLevel = level % 5;
+          const isWindow = openCenter
+            && perimeter
+            && !roof
+            && level >= 3
+            && floorLevel >= 1
+            && floorLevel <= 3
+            && (x + z) % 3 === 1;
           if (isDoor || isWindow) {
             continue;
           }
@@ -106,6 +118,10 @@ export class BrickStructure {
       this.localBounds.expandByPoint(descriptor.position);
     }
     this.localBounds.expandByScalar(1);
+    this.collisionRadius = Math.max(
+      this.localBounds.min.length(),
+      this.localBounds.max.length(),
+    );
     const matrix = new Matrix4();
     for (let materialIndex = 0; materialIndex < materialPalette.length; materialIndex += 1) {
       const batchDescriptors = descriptors.filter(
@@ -160,6 +176,36 @@ export class BrickStructure {
       && localPoint.y <= this.localBounds.max.y + padding
       && localPoint.z >= this.localBounds.min.z - padding
       && localPoint.z <= this.localBounds.max.z + padding;
+  }
+
+  intersectsWorldSegment(from: Vector3, to: Vector3, padding = 0): boolean {
+    this.root.worldToLocal(this.collisionStart.copy(from));
+    this.root.worldToLocal(this.collisionEnd.copy(to));
+    let minimumTime = 0;
+    let maximumTime = 1;
+    for (const axis of COLLISION_AXES) {
+      const start = this.collisionStart[axis];
+      const direction = this.collisionEnd[axis] - start;
+      const minimum = this.localBounds.min[axis] - padding;
+      const maximum = this.localBounds.max[axis] + padding;
+      if (Math.abs(direction) < 1e-7) {
+        if (start < minimum || start > maximum) {
+          return false;
+        }
+        continue;
+      }
+      let entry = (minimum - start) / direction;
+      let exit = (maximum - start) / direction;
+      if (entry > exit) {
+        [entry, exit] = [exit, entry];
+      }
+      minimumTime = Math.max(minimumTime, entry);
+      maximumTime = Math.min(maximumTime, exit);
+      if (minimumTime > maximumTime) {
+        return false;
+      }
+    }
+    return maximumTime >= 0 && minimumTime <= 1;
   }
 
   damageAt(worldPoint: Vector3, radius: number, damage: number, impulse: Vector3): number {

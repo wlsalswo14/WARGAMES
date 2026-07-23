@@ -30,6 +30,7 @@ export class Unit {
   readonly stats;
   readonly velocity = new Vector3();
   readonly desiredVelocity = new Vector3();
+  readonly previousPosition = new Vector3();
   readonly faction: FactionId;
   readonly kind: UnitKind;
   health: number;
@@ -63,6 +64,7 @@ export class Unit {
     this.model = createUnitModel(kind, faction);
     this.root.add(this.model);
     this.root.position.copy(position);
+    this.previousPosition.copy(position);
     this.root.userData.entity = this;
 
     this.aimNode = this.model.userData.aimNode as Object3D;
@@ -124,6 +126,16 @@ export class Unit {
 
   get isAircraft(): boolean {
     return this.kind === 'fighter' || this.kind === 'helicopter' || this.kind === 'drone';
+  }
+
+  beginSimulationStep(): void {
+    this.previousPosition.copy(this.position);
+  }
+
+  stopMovement(): void {
+    this.velocity.set(0, 0, 0);
+    this.desiredVelocity.set(0, 0, 0);
+    this.altitudeVelocity = 0;
   }
 
   get displayName(): string {

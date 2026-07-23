@@ -1,5 +1,10 @@
 import type { TerrainProfile, TerrainStampKind } from '../math';
-import type { TownBuildingLayout } from './layout';
+import {
+  BASE_LAYOUTS,
+  OUTPOST_LAYOUTS,
+  STAGING_SPAWN_LAYOUTS,
+  type TownBuildingLayout,
+} from './layout';
 
 export type BattlefieldThemeId =
   | 'mountains'
@@ -21,6 +26,15 @@ export interface TerrainStampPlan {
   z: number;
 }
 
+export interface WallLayout {
+  x: number;
+  z: number;
+  length: number;
+  height: number;
+  yaw: number;
+  color: number;
+}
+
 export interface BattlefieldTheme {
   id: BattlefieldThemeId;
   label: string;
@@ -30,6 +44,7 @@ export interface BattlefieldTheme {
   treeDensity: number;
   terrainStamps: TerrainStampPlan[];
   buildings: TownBuildingLayout[];
+  walls: WallLayout[];
 }
 
 export function createRandomBattlefieldTheme(): BattlefieldTheme {
@@ -44,9 +59,10 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
     'riverlands',
   ];
   const id = ids[Math.floor(random() * ids.length)];
-  const terrainStamps = createTerrainStamps(id, random);
-  const buildings = createBuildings(id, random);
   const terrainProfile = createTerrainProfile(id, random);
+  const terrainStamps = createTerrainStamps(id, random);
+  const buildings = createBuildings(id, random, terrainProfile);
+  const walls = createWalls(id, random, terrainProfile, buildings);
 
   if (id === 'mountains') {
     return {
@@ -58,6 +74,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       treeDensity: 0.7,
       terrainStamps,
       buildings,
+      walls,
     };
   }
   if (id === 'trenches') {
@@ -70,6 +87,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       treeDensity: 0.55,
       terrainStamps,
       buildings,
+      walls,
     };
   }
   if (id === 'urban') {
@@ -82,6 +100,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       treeDensity: 0.35,
       terrainStamps,
       buildings,
+      walls,
     };
   }
   if (id === 'forest') {
@@ -94,6 +113,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       treeDensity: 2.1,
       terrainStamps,
       buildings,
+      walls,
     };
   }
   if (id === 'canyon') {
@@ -106,6 +126,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
       treeDensity: 0.2,
       terrainStamps,
       buildings,
+      walls,
     };
   }
   return {
@@ -117,6 +138,7 @@ export function createRandomBattlefieldTheme(): BattlefieldTheme {
     treeDensity: 1.25,
     terrainStamps,
     buildings,
+    walls,
   };
 }
 
@@ -206,40 +228,108 @@ function createTerrainStamps(
 function createBuildings(
   id: BattlefieldThemeId,
   random: () => number,
+  terrainProfile: TerrainProfile,
 ): TownBuildingLayout[] {
   const targetCount = id === 'urban'
-    ? 18
+    ? 20
     : id === 'trenches'
-      ? 10
+      ? 12
       : id === 'riverlands'
-        ? 12
+        ? 14
         : id === 'forest'
-          ? 6
+          ? 8
           : id === 'canyon'
-            ? 5
-            : 7;
+            ? 7
+            : 9;
   const buildings: TownBuildingLayout[] = [];
   let attempts = 0;
-  while (buildings.length < targetCount && attempts < targetCount * 16) {
+  while (buildings.length < targetCount && attempts < targetCount * 32) {
     attempts += 1;
-    const x = randomRange(random, -145, 145);
-    const z = randomRange(random, -125, 125);
+    const x = randomRange(random, -265, 265);
+    const z = randomRange(random, -215, 215);
     if (
-      buildings.some((building) => Math.hypot(building.x - x, building.z - z) < 16)
-      || Math.hypot(x, z) < 24
+      buildings.some((building) => Math.hypot(building.x - x, building.z - z) < 25)
+      || isReservedArea(x, z, 52, 92)
+      || Math.abs(z - themeRiverCenterZ(x, terrainProfile)) < 20
     ) {
       continue;
     }
     buildings.push({
       x,
       z,
-      width: 4 + Math.floor(random() * 4),
-      height: id === 'urban' ? 5 + Math.floor(random() * 8) : 4 + Math.floor(random() * 5),
-      depth: 4 + Math.floor(random() * 3),
+      width: 5 + Math.floor(random() * 5),
+      height: id === 'urban'
+        ? 16 + Math.floor(random() * 16)
+        : 11 + Math.floor(random() * 12),
+      depth: 5 + Math.floor(random() * 4),
       color: [0x6f7778, 0x827668, 0x6d7367, 0x817069][Math.floor(random() * 4)],
     });
   }
   return buildings;
+}
+
+function createWalls(
+  id: BattlefieldThemeId,
+  random: () => number,
+  terrainProfile: TerrainProfile,
+  buildings: TownBuildingLayout[],
+): WallLayout[] {
+  const targetCount = id === 'trenches'
+    ? 18
+    : id === 'urban'
+      ? 14
+      : id === 'canyon'
+        ? 11
+        : id === 'riverlands'
+          ? 10
+          : id === 'forest'
+            ? 8
+            : 9;
+  const walls: WallLayout[] = [];
+  let attempts = 0;
+  while (walls.length < targetCount && attempts < targetCount * 28) {
+    attempts += 1;
+    const x = randomRange(random, -280, 280);
+    const z = randomRange(random, -225, 225);
+    if (
+      isReservedArea(x, z, 50, 88)
+      || Math.abs(z - themeRiverCenterZ(x, terrainProfile)) < 15
+      || buildings.some((building) => Math.hypot(building.x - x, building.z - z) < 19)
+      || walls.some((wall) => Math.hypot(wall.x - x, wall.z - z) < 15)
+    ) {
+      continue;
+    }
+    walls.push({
+      x,
+      z,
+      length: 15 + Math.floor(random() * 10),
+      height: 4 + Math.floor(random() * 4),
+      yaw: randomRange(random, 0, Math.PI),
+      color: [0x666c6d, 0x756c5e, 0x555f61, 0x746b62][Math.floor(random() * 4)],
+    });
+  }
+  return walls;
+}
+
+function themeRiverCenterZ(x: number, profile: TerrainProfile): number {
+  return Math.sin(
+    (x + profile.phaseX) * profile.riverFrequency + profile.riverPhase,
+  ) * profile.riverAmplitude;
+}
+
+function isReservedArea(
+  x: number,
+  z: number,
+  outpostClearance: number,
+  baseClearance: number,
+): boolean {
+  return OUTPOST_LAYOUTS.some(
+    (outpost) => Math.hypot(outpost.x - x, outpost.z - z) < outpostClearance,
+  ) || Object.values(BASE_LAYOUTS).some(
+    (base) => Math.hypot(base.x - x, base.z - z) < baseClearance,
+  ) || Object.values(STAGING_SPAWN_LAYOUTS).flat().some(
+    (staging) => Math.hypot(staging.x - x, staging.z - z) < baseClearance * 0.68,
+  );
 }
 
 function createTerrainProfile(
