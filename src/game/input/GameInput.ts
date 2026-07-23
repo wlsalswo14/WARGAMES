@@ -8,6 +8,20 @@ interface GameInputCallbacks {
   onResize: () => void;
 }
 
+const CONTROL_KEYS = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Space',
+  'ControlLeft',
+  'ControlRight',
+]);
+
 export class GameInput {
   private readonly keys = new Set<string>();
 
@@ -65,11 +79,17 @@ export class GameInput {
   };
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (this.pointerLocked && CONTROL_KEYS.has(event.code)) {
+      event.preventDefault();
+    }
     this.keys.add(event.code);
     this.callbacks.onKeyDown(event);
   };
 
   private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    if (this.pointerLocked && CONTROL_KEYS.has(event.code)) {
+      event.preventDefault();
+    }
     this.keys.delete(event.code);
   };
 

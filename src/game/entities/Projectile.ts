@@ -5,10 +5,20 @@ import {
   Vector3,
 } from 'three';
 import { WORLD } from '../config';
-import type { FactionId } from '../types';
+import type { FactionId, UnitKind } from '../types';
 import type { Unit } from './Unit';
 
 let nextProjectileId = 1;
+
+const projectileGeometries: Record<UnitKind, SphereGeometry> = {
+  infantry: new SphereGeometry(0.13, 7, 5),
+  tank: new SphereGeometry(0.36, 7, 5),
+  fighter: new SphereGeometry(0.17, 7, 5),
+  helicopter: new SphereGeometry(0.17, 7, 5),
+  drone: new SphereGeometry(0.24, 7, 5),
+};
+const shellMaterial = new MeshBasicMaterial({ color: 0xffd887 });
+const bulletMaterial = new MeshBasicMaterial({ color: 0xfff2b8 });
 
 export class Projectile {
   readonly id = `projectile-${nextProjectileId++}`;
@@ -22,6 +32,7 @@ export class Projectile {
   readonly blastRadius: number;
   life: number;
   alive = true;
+  private readonly lookTarget = new Vector3();
 
   constructor(source: Unit, position: Vector3, direction: Vector3) {
     this.sourceId = source.id;
@@ -31,18 +42,9 @@ export class Projectile {
     this.penetration = source.kind === 'tank' ? 105 : source.kind === 'fighter' ? 28 : 12;
     this.blastRadius = source.kind === 'tank' ? 5.8 : source.kind === 'drone' ? 3.4 : 0.8;
     this.life = source.kind === 'fighter' ? 3 : 4.5;
-    const radius = source.kind === 'tank'
-      ? 0.36
-      : source.kind === 'drone'
-        ? 0.24
-        : source.kind === 'fighter' || source.kind === 'helicopter'
-          ? 0.17
-          : 0.13;
     this.mesh = new Mesh(
-      new SphereGeometry(radius, 7, 5),
-      new MeshBasicMaterial({
-        color: source.kind === 'tank' ? 0xffd887 : 0xfff2b8,
-      }),
+      projectileGeometries[source.kind],
+      source.kind === 'tank' ? shellMaterial : bulletMaterial,
     );
     this.mesh.scale.z = source.kind === 'tank' ? 2.8 : 4.2;
     this.mesh.position.copy(position);
@@ -59,7 +61,7 @@ export class Projectile {
     this.velocity.y -= WORLD.gravity * ballisticScale * delta;
     this.velocity.addScaledVector(wind, delta * 0.018);
     this.mesh.position.addScaledVector(this.velocity, delta);
-    this.mesh.lookAt(this.mesh.position.clone().add(this.velocity));
+    this.mesh.lookAt(this.lookTarget.copy(this.mesh.position).add(this.velocity));
     if (this.life <= 0) {
       this.alive = false;
     }

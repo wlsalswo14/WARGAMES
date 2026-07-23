@@ -6,10 +6,9 @@ import {
   DirectionalLight,
   Fog,
   HemisphereLight,
-  MathUtils,
   Mesh,
   PerspectiveCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   Raycaster,
   Scene,
   SRGBColorSpace,
@@ -69,9 +68,15 @@ interface KillCamera {
   distance: number;
 }
 
+const FORWARD_KEYS = ['KeyW', 'ArrowUp'] as const;
+const BACKWARD_KEYS = ['KeyS', 'ArrowDown'] as const;
+const LEFT_KEYS = ['KeyA', 'ArrowLeft'] as const;
+const RIGHT_KEYS = ['KeyD', 'ArrowRight'] as const;
+
 export class BrickWarfare {
   private readonly shell: HTMLDivElement;
   private readonly renderer: WebGLRenderer;
+  private readonly softwareRendering: boolean;
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(55, 1, 0.1, 2200);
   private readonly clock = new Clock();
@@ -119,6 +124,11 @@ export class BrickWarfare {
   private fpsAccumulator = 0;
   private fpsFrames = 0;
   private displayedFps = 60;
+  private hudRefreshTimer = 0;
+  private aiAccumulator = 0;
+  private outpostAccumulator = 0;
+  private diplomacyAccumulator = 0;
+  private headquartersAccumulator = 0;
   private killCamera: KillCamera | null = null;
   private readonly explodedUnitIds = new Set<string>();
   private readonly destroyedAt = new Map<string, number>();
@@ -138,10 +148,11 @@ export class BrickWarfare {
     this.renderer.domElement.className = 'game-canvas';
     this.renderer.domElement.tabIndex = 0;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
+    this.softwareRendering = this.detectSoftwareRendering();
     this.shell.append(this.renderer.domElement);
 
     this.scene.background = new Color(0x91afbd);
@@ -161,6 +172,13 @@ export class BrickWarfare {
         );
         this.hud.notify('전장 네트워크 연결', '모든 진영의 지휘권과 빙의 권한이 활성화되었습니다.');
         this.hud.notify('작전 목표', '거점을 확보하고 적대 진영의 지휘 본부를 붕괴시키십시오.', '#ffcf5d');
+        if (this.softwareRendering) {
+          this.hud.notify(
+            '소프트웨어 렌더링 감지',
+            '브라우저 하드웨어 가속을 켠 뒤 다시 실행하면 CPU 사용량과 프레임이 개선됩니다.',
+            '#ff7b63',
+          );
+        }
       },
       onDeploy: (kind) => this.toggleDeploy(kind),
       onCycleFaction: () => this.cycleFaction(),
@@ -213,7 +231,7 @@ export class BrickWarfare {
     const sun = new DirectionalLight(0xfff0d4, 3.1);
     sun.position.set(-170, 240, 95);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -330;
     sun.shadow.camera.right = 330;
     sun.shadow.camera.top = 330;
@@ -333,14 +351,19 @@ export class BrickWarfare {
       this.updateGodControls(delta);
     }
 
-    this.ai.update(
-      delta,
-      this.units,
-      this.outposts,
-      this.diplomacy,
-      this.world.wind,
-      (unit, target) => this.combat.fire(unit, target),
-    );
+    this.aiAccumulator += delta;
+    if (this.aiAccumulator >= 1 / 30) {
+      const aiDelta = Math.min(this.aiAccumulator, 0.1);
+      this.aiAccumulator = 0;
+      this.ai.update(
+        aiDelta,
+        this.units,
+        this.outposts,
+        this.diplomacy,
+        this.world.wind,
+        (unit, target) => this.combat.fire(unit, target),
+      );
+    }
 
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
@@ -358,10 +381,22 @@ export class BrickWarfare {
     }
     this.combat.update(delta, this.world.wind, this.units, this.structures);
     this.brickBursts.update(delta);
-    this.updateOutposts(delta);
+    this.outpostAccumulator += delta;
+    if (this.outpostAccumulator >= 0.1) {
+      this.updateOutposts(this.outpostAccumulator);
+      this.outpostAccumulator = 0;
+    }
     this.updateEconomy(delta);
-    this.updateDiplomacy(delta);
-    this.checkHeadquarters();
+    this.diplomacyAccumulator += delta;
+    if (this.diplomacyAccumulator >= 0.5) {
+      this.updateDiplomacy(this.diplomacyAccumulator);
+      this.diplomacyAccumulator = 0;
+    }
+    this.headquartersAccumulator += delta;
+    if (this.headquartersAccumulator >= 0.5) {
+      this.checkHeadquarters();
+      this.headquartersAccumulator = 0;
+    }
     this.unitCleanupTimer -= delta;
     if (this.unitCleanupTimer <= 0) {
       this.unitCleanupTimer = 2;
@@ -375,8 +410,8 @@ export class BrickWarfare {
   }
 
   private updateGodControls(delta: number): void {
-    const forwardInput = Number(this.input.isDown('KeyW')) - Number(this.input.isDown('KeyS'));
-    const sideInput = Number(this.input.isDown('KeyA')) - Number(this.input.isDown('KeyD'));
+    const forwardInput = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
+    const sideInput = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const verticalInput = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ControlLeft') || this.input.isDown('ControlRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
@@ -403,23 +438,19 @@ export class BrickWarfare {
     if (!unit) {
       return;
     }
-    const forward = Number(this.input.isDown('KeyW')) - Number(this.input.isDown('KeyS'));
-    const side = Number(this.input.isDown('KeyA')) - Number(this.input.isDown('KeyD'));
+    const forward = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
+    const side = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ControlLeft') || this.input.isDown('ControlRight'));
-    unit.yaw = this.aimYaw;
-    if (unit.isAircraft) {
-      const flightVertical = unit.kind === 'fighter' ? -up : up;
-      unit.moveAircraft(forward, 0, flightVertical, delta, this.world.wind);
-      const right = flatForward(this.aimYaw + Math.PI / 2);
-      const strafeScale = unit.kind === 'fighter' ? 0.35 : 0.72;
-      unit.position.addScaledVector(right, side * unit.stats.speed * strafeScale * delta);
-      unit.roll = MathUtils.damp(unit.roll, -side * 0.26, 4, delta);
-    } else {
-      unit.moveGround(forward, 0, delta);
-      const right = flatForward(this.aimYaw + Math.PI / 2);
-      unit.position.addScaledVector(right, side * unit.stats.speed * 0.82 * delta);
-    }
+    unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
+  }
+
+  private inputAxis(
+    positiveKeys: readonly string[],
+    negativeKeys: readonly string[],
+  ): number {
+    return Number(positiveKeys.some((key) => this.input.isDown(key)))
+      - Number(negativeKeys.some((key) => this.input.isDown(key)));
   }
 
   private updateCamera(delta: number): void {
@@ -602,6 +633,11 @@ export class BrickWarfare {
       this.fpsAccumulator = 0;
       this.fpsFrames = 0;
     }
+    this.hudRefreshTimer -= delta;
+    if (this.hudRefreshTimer > 0) {
+      return;
+    }
+    this.hudRefreshTimer = 0.2;
     this.hud.setResources(this.resources.get(this.activeFaction) ?? 0);
     this.hud.setStats({
       fps: this.displayedFps,
@@ -980,8 +1016,20 @@ export class BrickWarfare {
     const height = this.shell.clientHeight;
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.setSize(width, height, false);
+  }
+
+  private detectSoftwareRendering(): boolean {
+    const context = this.renderer.getContext();
+    const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
+      UNMASKED_RENDERER_WEBGL: number;
+    } | null;
+    if (!debugInfo) {
+      return false;
+    }
+    const rendererName = String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+    return /swiftshader|llvmpipe|software|basic render/i.test(rendererName);
   }
 
   private strategyLabel(strategy: string): string {

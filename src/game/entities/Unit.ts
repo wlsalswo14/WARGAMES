@@ -163,7 +163,7 @@ export class Unit {
       const ground = terrainHeight(this.position.x, this.position.z);
       this.position.y = MathUtils.damp(this.position.y, ground, 18, delta);
       const trenchDepth = ground < -1.8;
-      if (this.kind === 'tank' && trenchDepth && this.velocity.length() < 5) {
+      if (this.kind === 'tank' && !this.possessed && trenchDepth && this.velocity.length() < 5) {
         this.immobilizedTimer = Math.max(this.immobilizedTimer, 0.8);
       }
     }
@@ -240,6 +240,37 @@ export class Unit {
       }
       this.altitudeVelocity = Math.max(0, this.altitudeVelocity);
     }
+  }
+
+  movePossessed(
+    forwardInput: number,
+    sideInput: number,
+    verticalInput: number,
+    aimYaw: number,
+    delta: number,
+    wind: Vector3,
+  ): void {
+    this.yaw = aimYaw;
+    const lateral = flatForward(aimYaw + Math.PI / 2);
+    if (this.kind === 'fighter') {
+      const targetThrottle = forwardInput > 0 ? 1 : forwardInput < 0 ? 0.32 : 0.68;
+      this.throttle = MathUtils.damp(this.throttle, targetThrottle, 3.4, delta);
+      this.moveAircraft(0, 0, -verticalInput, delta, wind);
+      this.position.addScaledVector(lateral, sideInput * this.stats.speed * 0.35 * delta);
+      this.roll = MathUtils.damp(this.roll, -sideInput * 0.26, 4, delta);
+      return;
+    }
+    if (this.isAircraft) {
+      this.moveAircraft(forwardInput, 0, verticalInput, delta, wind);
+      this.position.addScaledVector(lateral, sideInput * this.stats.speed * 0.72 * delta);
+      this.roll = MathUtils.damp(this.roll, -sideInput * 0.26, 4, delta);
+      return;
+    }
+    if (forwardInput !== 0 || sideInput !== 0) {
+      this.immobilizedTimer = 0;
+    }
+    this.moveGround(forwardInput, 0, delta);
+    this.position.addScaledVector(lateral, sideInput * this.stats.speed * 0.82 * delta);
   }
 
   steerToward(destination: Vector3, delta: number, wind: Vector3): number {

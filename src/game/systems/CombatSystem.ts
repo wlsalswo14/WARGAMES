@@ -29,6 +29,7 @@ export interface CombatKillEvent {
 export class CombatSystem {
   readonly projectiles: Projectile[] = [];
   private readonly effects: ImpactEffect[] = [];
+  private readonly impactGeometry = new SphereGeometry(1, 10, 7);
   private readonly scene: Scene;
   private readonly onDestroyed: (event: CombatKillEvent) => void;
   private readonly onPossessedDamage: (damage: number) => void;
@@ -94,7 +95,6 @@ export class CombatSystem {
       }
       if (!projectile.alive) {
         this.scene.remove(projectile.mesh);
-        projectile.mesh.geometry.dispose();
         this.projectiles.splice(index, 1);
       }
     }
@@ -108,7 +108,6 @@ export class CombatSystem {
       material.opacity = Math.max(0, 1 - progress);
       if (effect.life <= 0) {
         this.scene.remove(effect.mesh);
-        effect.mesh.geometry.dispose();
         material.dispose();
         this.effects.splice(index, 1);
       }
@@ -247,7 +246,7 @@ export class CombatSystem {
 
   private createImpact(position: Vector3, color: number, size: number): void {
     const mesh = new Mesh(
-      new SphereGeometry(size, 10, 7),
+      this.impactGeometry,
       new MeshBasicMaterial({
         color,
         transparent: true,
@@ -256,6 +255,7 @@ export class CombatSystem {
         depthWrite: false,
       }),
     );
+    mesh.scale.setScalar(size);
     mesh.position.copy(position);
     this.scene.add(mesh);
     this.effects.push({ mesh, life: 0.35, duration: 0.35 });

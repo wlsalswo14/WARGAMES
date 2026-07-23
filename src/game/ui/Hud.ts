@@ -85,7 +85,8 @@ export class Hud {
         <b>더블클릭/Enter</b> 선택 유닛 빙의
       </div>
       <div class="controls controls-possession hidden">
-        <b>W/S</b> 전후 · <b>A</b> 오른쪽 · <b>D</b> 왼쪽 · <b>마우스</b> 방향 전환<br />
+        <b>WASD/방향키</b> 전후좌우 · <b>마우스</b> 방향 전환<br />
+        <b>전투기 W/S</b> 가속/감속 · <b>A/D</b> 좌우 이동<br />
         <b>좌클릭</b> 사격 · <b>Space/Ctrl</b> 상승/하강<br />
         <b>V</b> 1·3인칭 · <b>G 또는 Esc</b> 신 모드 복귀
       </div>

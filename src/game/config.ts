@@ -98,6 +98,6 @@ export const WORLD = {
   outpostCaptureTime: 5,
   resourceTick: 2,
   diplomacyInterval: 45,
-  maxProjectiles: 180,
-  maxRubble: 220,
+  maxProjectiles: 110,
+  maxRubble: 90,
 } as const;

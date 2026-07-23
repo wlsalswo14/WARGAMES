@@ -1,6 +1,9 @@
 import {
   BoxGeometry,
+  DynamicDrawUsage,
   Group,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   Vector3,
@@ -10,7 +13,9 @@ import { seededRandom, terrainHeight } from '../math';
 import type { FactionId } from '../types';
 
 interface BrickPiece {
-  mesh: Mesh;
+  batch: InstancedMesh;
+  instanceIndex: number;
+  position: Vector3;
   health: number;
   support: boolean;
   alive: boolean;
@@ -32,9 +37,11 @@ export class BrickStructure {
   readonly rubble: RubblePiece[] = [];
   readonly faction: FactionId | null;
   destroyed = false;
+  private aliveBrickCount = 0;
   private supportTotal = 0;
   private supportRemaining = 0;
   private collapseTriggered = false;
+  private readonly hiddenMatrix = new Matrix4();
 
   constructor(
     position: Vector3,
@@ -52,6 +59,11 @@ export class BrickStructure {
       new MeshStandardMaterial({ color: Math.max(0, color - 0x0c0a07), roughness: 0.92 }),
     ];
     const brickGeometry = new BoxGeometry(1.9, 0.72, 0.92);
+    const descriptors: Array<{
+      position: Vector3;
+      materialIndex: number;
+      support: boolean;
+    }> = [];
 
     for (let level = 0; level < dimensions.height; level += 1) {
       for (let x = 0; x < dimensions.width; x += 1) {
@@ -69,19 +81,17 @@ export class BrickStructure {
             continue;
           }
           const seed = level * 1000 + x * 37 + z * 73 + nextStructureId;
-          const mesh = new Mesh(brickGeometry, materialPalette[Math.floor(seededRandom(seed) * materialPalette.length)]);
           const offset = level % 2 === 0 ? 0 : 0.45;
-          mesh.position.set(
-            (x - (dimensions.width - 1) / 2) * 1.86 + offset,
-            level * 0.73 + 0.36,
-            (z - (dimensions.depth - 1) / 2) * 0.9,
-          );
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          mesh.userData.structure = this;
           const support = level === 0;
-          this.bricks.push({ mesh, health: support ? 95 : 65, support, alive: true });
-          this.root.add(mesh);
+          descriptors.push({
+            position: new Vector3(
+              (x - (dimensions.width - 1) / 2) * 1.86 + offset,
+              level * 0.73 + 0.36,
+              (z - (dimensions.depth - 1) / 2) * 0.9,
+            ),
+            materialIndex: Math.floor(seededRandom(seed) * materialPalette.length),
+            support,
+          });
           if (support) {
             this.supportTotal += 1;
             this.supportRemaining += 1;
@@ -89,13 +99,51 @@ export class BrickStructure {
         }
       }
     }
+    this.aliveBrickCount = descriptors.length;
+    const matrix = new Matrix4();
+    for (let materialIndex = 0; materialIndex < materialPalette.length; materialIndex += 1) {
+      const batchDescriptors = descriptors.filter(
+        (descriptor) => descriptor.materialIndex === materialIndex,
+      );
+      if (batchDescriptors.length === 0) {
+        continue;
+      }
+      const batch = new InstancedMesh(
+        brickGeometry,
+        materialPalette[materialIndex],
+        batchDescriptors.length,
+      );
+      batch.instanceMatrix.setUsage(DynamicDrawUsage);
+      batch.castShadow = true;
+      batch.receiveShadow = true;
+      batch.userData.structure = this;
+      for (let instanceIndex = 0; instanceIndex < batchDescriptors.length; instanceIndex += 1) {
+        const descriptor = batchDescriptors[instanceIndex];
+        matrix.makeTranslation(
+          descriptor.position.x,
+          descriptor.position.y,
+          descriptor.position.z,
+        );
+        batch.setMatrixAt(instanceIndex, matrix);
+        this.bricks.push({
+          batch,
+          instanceIndex,
+          position: descriptor.position,
+          health: descriptor.support ? 95 : 65,
+          support: descriptor.support,
+          alive: true,
+        });
+      }
+      batch.instanceMatrix.needsUpdate = true;
+      this.root.add(batch);
+    }
   }
 
   get integrity(): number {
     if (this.bricks.length === 0) {
       return 0;
     }
-    return this.bricks.filter((brick) => brick.alive).length / this.bricks.length;
+    return this.aliveBrickCount / this.bricks.length;
   }
 
   damageAt(worldPoint: Vector3, radius: number, damage: number, impulse: Vector3): number {
@@ -105,7 +153,7 @@ export class BrickStructure {
       if (!brick.alive) {
         continue;
       }
-      const distance = brick.mesh.position.distanceTo(localPoint);
+      const distance = brick.position.distanceTo(localPoint);
       if (distance > radius) {
         continue;
       }
@@ -123,7 +171,7 @@ export class BrickStructure {
       this.collapseTriggered = true;
       this.triggerCollapse(worldPoint);
     }
-    this.destroyed = this.bricks.every((brick) => !brick.alive);
+    this.destroyed = this.aliveBrickCount === 0;
     return destroyedCount;
   }
 
@@ -147,7 +195,6 @@ export class BrickStructure {
       }
       if (rubble.life <= 0 || this.rubble.length > WORLD.maxRubble) {
         this.root.remove(rubble.mesh);
-        rubble.mesh.geometry.dispose();
         this.rubble.splice(index, 1);
       }
     }
@@ -158,9 +205,16 @@ export class BrickStructure {
     if (brick.support) {
       this.supportRemaining -= 1;
     }
-    this.root.remove(brick.mesh);
-    const rubbleMesh = brick.mesh.clone();
+    this.aliveBrickCount -= 1;
+    this.hiddenMatrix.makeScale(0, 0, 0);
+    this.hiddenMatrix.setPosition(brick.position);
+    brick.batch.setMatrixAt(brick.instanceIndex, this.hiddenMatrix);
+    brick.batch.instanceMatrix.needsUpdate = true;
+    const rubbleMesh = new Mesh(brick.batch.geometry, brick.batch.material);
+    rubbleMesh.position.copy(brick.position);
     rubbleMesh.scale.multiplyScalar(0.9);
+    rubbleMesh.castShadow = false;
+    rubbleMesh.receiveShadow = false;
     this.root.add(rubbleMesh);
     this.rubble.push({
       mesh: rubbleMesh,
@@ -185,7 +239,7 @@ export class BrickStructure {
         continue;
       }
       if (Math.random() < 0.72) {
-        const outward = brick.mesh.position.clone().sub(localOrigin).normalize();
+        const outward = brick.position.clone().sub(localOrigin).normalize();
         this.breakBrick(brick, outward.multiplyScalar(2 + Math.random() * 4));
       }
     }

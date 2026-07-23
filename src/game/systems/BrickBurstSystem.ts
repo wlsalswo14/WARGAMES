@@ -27,7 +27,7 @@ export class BrickBurstSystem {
   private readonly scratchBox = new Box3();
   private readonly scratchSize = new Vector3();
   private readonly scratchCenter = new Vector3();
-  private readonly maxFragments = 280;
+  private readonly maxFragments = 140;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -69,7 +69,7 @@ export class BrickBurstSystem {
         size,
         colors[index % colors.length],
         velocity,
-        5 + Math.random() * 3,
+        3.5 + Math.random() * 2.5,
       );
     }
     this.trim();
@@ -93,7 +93,7 @@ export class BrickBurstSystem {
         size,
         colors[index % colors.length],
         direction.multiplyScalar(force * (0.45 + Math.random() * 0.8)),
-        4.5 + Math.random() * 3,
+        3 + Math.random() * 2,
       );
     }
     this.trim();
@@ -140,15 +140,15 @@ export class BrickBurstSystem {
       new BoxGeometry(size.x, size.y, size.z),
       this.getMaterial(color),
     );
-    body.castShadow = true;
-    body.receiveShadow = true;
+    body.castShadow = false;
+    body.receiveShadow = false;
     body.userData.disposableGeometry = true;
     root.add(body);
 
     if (size.x > 0.38 && size.z > 0.38) {
       const stud = new Mesh(this.studGeometry, this.getMaterial(color));
       stud.position.y = size.y / 2 + 0.05;
-      stud.castShadow = true;
+      stud.castShadow = false;
       root.add(stud);
       if (size.x > 1.15) {
         const secondStud = stud.clone();
