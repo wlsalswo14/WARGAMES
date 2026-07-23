@@ -248,18 +248,26 @@ export class BattlefieldAI {
     const assigned = assignedId
       ? outposts.find((outpost) => outpost.id === assignedId) ?? null
       : null;
-    if (assigned && this.isCaptureObjective(unit, assigned, diplomacy)) {
+    const needsRecovery = !outposts.some((outpost) => outpost.owner === unit.faction);
+    if (assigned && this.isCaptureObjective(unit, assigned, diplomacy, needsRecovery)) {
       return assigned;
     }
     this.objectiveAssignments.delete(unit.id);
 
+    const recoveryOutposts = needsRecovery
+      ? outposts.filter((outpost) => outpost.owner !== unit.faction)
+      : [];
     const hostileOutposts = outposts.filter((outpost) => (
       outpost.owner !== null
       && outpost.owner !== unit.faction
       && diplomacy.isHostile(unit.faction, outpost.owner)
     ));
     const neutralOutposts = outposts.filter((outpost) => outpost.owner === null);
-    const candidates = hostileOutposts.length > 0 ? hostileOutposts : neutralOutposts;
+    const candidates = needsRecovery
+      ? recoveryOutposts
+      : hostileOutposts.length > 0
+        ? hostileOutposts
+        : neutralOutposts;
     if (candidates.length === 0) {
       return null;
     }
@@ -281,8 +289,11 @@ export class BattlefieldAI {
     unit: Unit,
     outpost: Outpost,
     diplomacy: DiplomacySystem,
+    needsRecovery: boolean,
   ): boolean {
-    return outpost.owner === null
+    return needsRecovery
+      ? outpost.owner !== unit.faction
+      : outpost.owner === null
       || (
         outpost.owner !== unit.faction
         && diplomacy.isHostile(unit.faction, outpost.owner)

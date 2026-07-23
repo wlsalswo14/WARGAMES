@@ -93,6 +93,7 @@ export class BrickWarfare {
   private readonly outposts: Outpost[] = [];
   private readonly headquarters = new Map<FactionId, BrickStructure>();
   private readonly destroyedHeadquarters = new Set<FactionId>();
+  private readonly eliminatedFactions = new Set<FactionId>();
   private readonly resources = new Map<FactionId, number>([
     ['azure', 900],
     ['crimson', 900],
@@ -127,6 +128,7 @@ export class BrickWarfare {
   private outpostAccumulator = 0;
   private diplomacyAccumulator = 0;
   private headquartersAccumulator = 0;
+  private victoryFaction: FactionId | null = null;
   private killCamera: KillCamera | null = null;
   private readonly explodedUnitIds = new Set<string>();
   private readonly destroyedAt = new Map<string, number>();
@@ -169,7 +171,7 @@ export class BrickWarfare {
           '#8ed8ff',
         );
         this.hud.notify('전장 네트워크 연결', '모든 진영의 지휘권과 빙의 권한이 활성화되었습니다.');
-        this.hud.notify('작전 목표', '거점을 확보하고 적대 진영의 지휘 본부를 붕괴시키십시오.', '#ffcf5d');
+        this.hud.notify('작전 목표', '거점을 확보해 증원하고 적대 국가의 병력을 전멸시키십시오.', '#ffcf5d');
         if (this.softwareRendering) {
           this.hud.notify(
             '소프트웨어 렌더링 감지',
@@ -386,6 +388,7 @@ export class BrickWarfare {
       structure.update(delta);
     }
     this.combat.update(delta, this.units, this.structures);
+    this.checkFactionEliminations();
     this.brickBursts.update(delta);
     this.outpostAccumulator += delta;
     if (this.outpostAccumulator >= 0.1) {
@@ -581,6 +584,9 @@ export class BrickWarfare {
     if (this.resourceTimer <= 0) {
       this.resourceTimer = WORLD.resourceTick;
       for (const faction of FACTION_ORDER) {
+        if (this.eliminatedFactions.has(faction)) {
+          continue;
+        }
         const outpostIncome = this.outposts.filter((outpost) => outpost.owner === faction).length * 14;
         const doctrineBonus = FACTIONS[faction].doctrine === 'entrenchment' ? 4 : 0;
         this.resources.set(faction, (this.resources.get(faction) ?? 0) + 18 + outpostIncome + doctrineBonus);
@@ -596,25 +602,68 @@ export class BrickWarfare {
 
   private spawnAiReinforcement(faction: FactionId): void {
     const alive = this.units.filter((unit) => unit.faction === faction && !unit.destroyed).length;
-    if (alive >= TARGET_UNITS_PER_FACTION || this.destroyedHeadquarters.has(faction)) {
+    if (
+      alive === 0
+      || alive >= TARGET_UNITS_PER_FACTION
+      || this.eliminatedFactions.has(faction)
+    ) {
       return;
     }
     const sequence = this.reinforcementSequence.get(faction) ?? 0;
     const ownedOutposts = this.outposts.filter((outpost) => outpost.owner === faction);
-    const spawnAnchor = ownedOutposts[sequence % Math.max(1, ownedOutposts.length)]?.root.position
-      ?? this.headquarters.get(faction)?.root.position;
-    if (!spawnAnchor) {
+    if (ownedOutposts.length === 0) {
       return;
     }
     const strategy = this.ai.getStrategy(faction);
     const missing = TARGET_UNITS_PER_FACTION - alive;
-    for (let index = 0; index < missing; index += 1) {
+    const spawnCount = Math.min(missing, ownedOutposts.length);
+    for (let index = 0; index < spawnCount; index += 1) {
       const kind = chooseReinforcementKind(strategy);
       const nextSequence = sequence + index;
+      const spawnAnchor = ownedOutposts[nextSequence % ownedOutposts.length].root.position;
       const spawn = reinforcementSpawnPosition(spawnAnchor, nextSequence);
       this.spawnUnit(kind, faction, spawn);
     }
-    this.reinforcementSequence.set(faction, sequence + missing);
+    this.reinforcementSequence.set(faction, sequence + spawnCount);
+  }
+
+  private checkFactionEliminations(): void {
+    let territoryChanged = false;
+    for (const faction of FACTION_ORDER) {
+      if (
+        this.eliminatedFactions.has(faction)
+        || this.units.some((unit) => unit.faction === faction && !unit.destroyed)
+      ) {
+        continue;
+      }
+      this.eliminatedFactions.add(faction);
+      this.resources.set(faction, 0);
+      for (const outpost of this.outposts) {
+        if (outpost.owner === faction) {
+          outpost.setOwner(null);
+          territoryChanged = true;
+        }
+      }
+      this.hud.notify(
+        '국가 멸망',
+        `${FACTIONS[faction].name}의 생존 병력이 모두 전멸했습니다.`,
+        '#ff4f47',
+      );
+    }
+    if (territoryChanged) {
+      this.world.setTerritories(this.outposts);
+    }
+    const survivors = FACTION_ORDER.filter(
+      (faction) => !this.eliminatedFactions.has(faction),
+    );
+    if (survivors.length === 1 && this.victoryFaction === null) {
+      this.victoryFaction = survivors[0];
+      this.hud.notify(
+        '전쟁 승리',
+        `${FACTIONS[this.victoryFaction].name}이 최후의 생존 국가가 되었습니다.`,
+        FACTIONS[this.victoryFaction].accent,
+      );
+    }
   }
 
   private cleanupDestroyedUnits(): void {
@@ -660,6 +709,9 @@ export class BrickWarfare {
   private updateDiplomacy(delta: number): void {
     const strength = new Map<FactionId, number>();
     for (const faction of FACTION_ORDER) {
+      if (this.eliminatedFactions.has(faction)) {
+        continue;
+      }
       const unitStrength = this.units
         .filter((unit) => unit.faction === faction && !unit.destroyed)
         .reduce((total, unit) => total + unit.health / unit.stats.maxHealth + unit.stats.cost / 150, 0);
@@ -681,7 +733,7 @@ export class BrickWarfare {
       this.destroyedHeadquarters.add(faction);
       this.hud.notify(
         '지휘 본부 붕괴',
-        `${FACTIONS[faction].name}의 전략 자산과 증원 능력이 상실되었습니다.`,
+        `${FACTIONS[faction].name}의 본부가 파괴됐지만 생존 병력과 점령 거점은 계속 작전합니다.`,
         '#ff5f57',
       );
     }
@@ -720,6 +772,11 @@ export class BrickWarfare {
     this.hud.setStats({
       unitCounts,
       outpostCounts,
+      eliminated: {
+        azure: this.eliminatedFactions.has('azure'),
+        crimson: this.eliminatedFactions.has('crimson'),
+        amber: this.eliminatedFactions.has('amber'),
+      },
       neutralOutposts,
     });
     this.hud.setSelection(this.possessedUnit ?? this.selectedUnit);
@@ -1009,6 +1066,15 @@ export class BrickWarfare {
       this.structures.push(structure);
       this.scene.add(structure.root);
     } else {
+      if (this.eliminatedFactions.has(this.activeFaction)) {
+        this.eliminatedFactions.delete(this.activeFaction);
+        this.victoryFaction = null;
+        this.hud.notify(
+          '신 모드 국가 재건',
+          `${FACTIONS[this.activeFaction].name}에 새 병력을 배치해 전장에 복귀시켰습니다.`,
+          FACTIONS[this.activeFaction].accent,
+        );
+      }
       const unit = this.spawnUnit(kind, this.activeFaction, point);
       this.selectUnit(unit);
     }

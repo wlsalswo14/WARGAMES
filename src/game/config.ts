@@ -57,7 +57,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     range: 165,
     armor: 18,
     cost: 420,
-    capturePower: 0,
+    capturePower: 1,
   },
   helicopter: {
     maxHealth: 180,
@@ -66,7 +66,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     range: 130,
     armor: 24,
     cost: 360,
-    capturePower: 0,
+    capturePower: 1,
   },
   drone: {
     maxHealth: 48,
@@ -75,7 +75,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     range: 72,
     armor: 3,
     cost: 120,
-    capturePower: 0,
+    capturePower: 1,
   },
 };
 

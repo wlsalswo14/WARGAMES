@@ -115,15 +115,15 @@ export class Outpost {
     if (this.captureProgress < WORLD.outpostCaptureTime) {
       return null;
     }
-    this.owner = faction;
-    this.captureProgress = 0;
-    this.captureFaction = null;
-    this.ring.material.color.set(FACTIONS[faction].color);
-    this.territory.material.color.set(FACTIONS[faction].color);
-    this.territory.material.opacity = 0.2;
-    this.beacon.material.color.set(FACTIONS[faction].color);
-    this.beacon.material.emissive.set(FACTIONS[faction].color);
+    this.setOwner(faction);
     return faction;
+  }
+
+  setOwner(owner: FactionId | null): void {
+    this.owner = owner;
+    this.resetCapture();
+    this.beacon.material.color.set(owner ? FACTIONS[owner].color : 0xc5d0d6);
+    this.beacon.material.emissive.set(owner ? FACTIONS[owner].color : 0x44515a);
   }
 
   private resetCapture(): void {

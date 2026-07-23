@@ -59,5 +59,6 @@ export interface DiplomacyEvent {
 export interface BattlefieldStats {
   unitCounts: Record<FactionId, number>;
   outpostCounts: Record<FactionId, number>;
+  eliminated: Record<FactionId, boolean>;
   neutralOutposts: number;
 }

@@ -45,7 +45,7 @@ export function reinforcementSpawnPosition(
   sequence: number,
 ): Vector3 {
   const angle = sequence * GOLDEN_ANGLE;
-  const radius = 18 + (sequence % 4) * 8;
+  const radius = 10 + (sequence % 4) * 2.5;
   return anchor.clone().add(new Vector3(
     Math.cos(angle) * radius,
     0,

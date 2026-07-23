@@ -211,9 +211,9 @@ export class Hud {
       `중립 ${stats.neutralOutposts}`,
     ].join(' · ');
     this.unitStatsLabel.textContent = [
-      `청람 ${stats.unitCounts.azure}`,
-      `적월 ${stats.unitCounts.crimson}`,
-      `황토 ${stats.unitCounts.amber}`,
+      stats.eliminated.azure ? '청람 멸망' : `청람 ${stats.unitCounts.azure}`,
+      stats.eliminated.crimson ? '적월 멸망' : `적월 ${stats.unitCounts.crimson}`,
+      stats.eliminated.amber ? '황토 멸망' : `황토 ${stats.unitCounts.amber}`,
     ].join(' · ');
   }
 
