@@ -121,9 +121,6 @@ export class BrickWarfare {
   private elapsed = 0;
   private resourceTimer = WORLD.resourceTick;
   private aiSpawnTimer = 7;
-  private fpsAccumulator = 0;
-  private fpsFrames = 0;
-  private displayedFps = 60;
   private hudRefreshTimer = 0;
   private aiAccumulator = 0;
   private outpostAccumulator = 0;
@@ -217,7 +214,6 @@ export class BrickWarfare {
     this.handleResize();
     this.world.update(this.godPosition);
     this.updateDiplomacyHud();
-    this.hud.setWind(this.world.wind.x, this.world.wind.z);
   }
 
   start(): void {
@@ -361,7 +357,13 @@ export class BrickWarfare {
         this.outposts,
         this.diplomacy,
         this.world.wind,
-        (unit, target) => this.combat.fire(unit, target),
+        (unit, target, mode) => {
+          if (mode === 'suicide') {
+            this.combat.detonateDrone(unit, this.units, this.structures);
+          } else {
+            this.combat.fire(unit, target, mode);
+          }
+        },
       );
     }
 
@@ -379,7 +381,7 @@ export class BrickWarfare {
     for (const structure of this.structures) {
       structure.update(delta);
     }
-    this.combat.update(delta, this.world.wind, this.units, this.structures);
+    this.combat.update(delta, this.units, this.structures);
     this.brickBursts.update(delta);
     this.outpostAccumulator += delta;
     if (this.outpostAccumulator >= 0.1) {
@@ -626,24 +628,39 @@ export class BrickWarfare {
   }
 
   private updateHud(delta: number): void {
-    this.fpsAccumulator += delta;
-    this.fpsFrames += 1;
-    if (this.fpsAccumulator >= 0.5) {
-      this.displayedFps = Math.round(this.fpsFrames / this.fpsAccumulator);
-      this.fpsAccumulator = 0;
-      this.fpsFrames = 0;
-    }
     this.hudRefreshTimer -= delta;
     if (this.hudRefreshTimer > 0) {
       return;
     }
     this.hudRefreshTimer = 0.2;
     this.hud.setResources(this.resources.get(this.activeFaction) ?? 0);
+    const unitCounts: Record<FactionId, number> = {
+      azure: 0,
+      crimson: 0,
+      amber: 0,
+    };
+    for (const unit of this.units) {
+      if (!unit.destroyed) {
+        unitCounts[unit.faction] += 1;
+      }
+    }
+    const outpostCounts: Record<FactionId, number> = {
+      azure: 0,
+      crimson: 0,
+      amber: 0,
+    };
+    let neutralOutposts = 0;
+    for (const outpost of this.outposts) {
+      if (outpost.owner) {
+        outpostCounts[outpost.owner] += 1;
+      } else {
+        neutralOutposts += 1;
+      }
+    }
     this.hud.setStats({
-      fps: this.displayedFps,
-      unitCount: this.units.filter((unit) => !unit.destroyed).length,
-      projectileCount: this.combat.projectiles.length,
-      chunkCount: this.world.chunkCount,
+      unitCounts,
+      outpostCounts,
+      neutralOutposts,
     });
     this.hud.setSelection(this.possessedUnit ?? this.selectedUnit);
   }
@@ -720,11 +737,26 @@ export class BrickWarfare {
       this.input.lockPointer();
     }
     if (this.mode === 'possession') {
-      if (event.button === 0 && this.possessedUnit) {
+      if ((event.button === 0 || event.button === 2) && this.possessedUnit) {
+        if (event.button === 2 && this.possessedUnit.kind === 'drone') {
+          this.combat.detonateDrone(
+            this.possessedUnit,
+            this.units,
+            this.structures,
+          );
+          return;
+        }
+        if (event.button === 2 && this.possessedUnit.kind === 'infantry') {
+          return;
+        }
         const direction = new Vector3();
         this.camera.getWorldDirection(direction);
         const target = this.camera.position.clone().addScaledVector(direction, 1000);
-        this.combat.fire(this.possessedUnit, target);
+        this.combat.fire(
+          this.possessedUnit,
+          target,
+          event.button === 2 ? 'special' : 'normal',
+        );
       }
       return;
     }

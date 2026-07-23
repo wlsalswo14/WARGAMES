@@ -6,9 +6,16 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import { WORLD } from '../config';
+import {
+  getDroneSuicideStats,
+  getWeaponStats,
+  WORLD,
+} from '../config';
 import { terrainHeight } from '../math';
-import type { FactionId } from '../types';
+import type {
+  FactionId,
+  ProjectileAttackMode,
+} from '../types';
 import type { BrickStructure } from '../entities/BrickStructure';
 import { Projectile } from '../entities/Projectile';
 import type { Unit } from '../entities/Unit';
@@ -47,29 +54,83 @@ export class CombatSystem {
     this.onExplosion = onExplosion;
   }
 
-  fire(unit: Unit, target?: Vector3): void {
-    if (!unit.canFire() || this.projectiles.length >= WORLD.maxProjectiles) {
-      return;
+  fire(
+    unit: Unit,
+    target?: Vector3,
+    attackMode: ProjectileAttackMode = 'normal',
+  ): boolean {
+    const weapon = getWeaponStats(unit.kind, attackMode);
+    if (
+      !weapon
+      || !unit.canFire(attackMode)
+      || this.projectiles.length >= WORLD.maxProjectiles
+    ) {
+      return false;
     }
     unit.faceTarget(target ?? unit.position.clone().add(unit.getFireDirection().multiplyScalar(100)), 0.16);
     const position = unit.getMuzzlePosition(target);
     const direction = unit.getFireDirection(target);
-    const projectile = new Projectile(unit, position, direction);
+    const projectile = new Projectile(unit, position, direction, attackMode, weapon);
     this.projectiles.push(projectile);
     this.scene.add(projectile.mesh);
-    unit.markFired();
-    this.createImpact(position, unit.kind === 'tank' ? 0xffb44b : 0xffefac, unit.kind === 'tank' ? 0.75 : 0.28);
+    unit.markFired(attackMode, weapon.reload);
+    this.createImpact(
+      position,
+      attackMode === 'special' ? 0xff7138 : 0xffefac,
+      attackMode === 'special' ? 1.1 : 0.28,
+    );
+    return true;
+  }
+
+  detonateDrone(
+    unit: Unit,
+    units: Unit[],
+    structures: BrickStructure[],
+  ): boolean {
+    if (unit.kind !== 'drone' || !unit.canFire('suicide')) {
+      return false;
+    }
+    const weapon = getDroneSuicideStats();
+    const position = unit.position.clone();
+    const playerControlled = unit.possessed;
+    unit.markFired('suicide', weapon.reload);
+    unit.applyRawDamage(unit.health, unit.faction);
+    this.onDestroyed({
+      victim: unit,
+      attackerFaction: unit.faction,
+      attackerUnit: unit,
+      playerControlled,
+    });
+    const structureRadius = weapon.blastRadius + 12;
+    for (const structure of structures) {
+      if (
+        structure.destroyed
+        || structure.root.position.distanceToSquared(position) > structureRadius * structureRadius
+      ) {
+        continue;
+      }
+      structure.destroyAll(new Vector3(0, 8, 0));
+    }
+    this.explode(
+      position,
+      weapon.blastRadius,
+      weapon.damage,
+      units,
+      unit.faction,
+      unit.id,
+      playerControlled,
+    );
+    return true;
   }
 
   update(
     delta: number,
-    wind: Vector3,
     units: Unit[],
     structures: BrickStructure[],
   ): void {
     for (let index = this.projectiles.length - 1; index >= 0; index -= 1) {
       const projectile = this.projectiles[index];
-      projectile.update(delta, wind);
+      projectile.update(delta);
       if (projectile.alive) {
         this.checkUnitHit(projectile, units);
       }
@@ -175,13 +236,21 @@ export class CombatSystem {
       if (structure.destroyed || structure.root.position.distanceToSquared(projectile.mesh.position) > 28 * 28) {
         continue;
       }
-      const impulse = projectile.velocity.clone().normalize().multiplyScalar(projectile.damage * 0.055);
-      const destroyedBricks = structure.damageAt(
+      if (!structure.containsWorldPoint(
         projectile.mesh.position,
-        Math.max(1.2, projectile.blastRadius),
-        projectile.damage,
-        impulse,
-      );
+        projectile.destroysStructures ? 2.5 : 1.2,
+      )) {
+        continue;
+      }
+      const impulse = projectile.velocity.clone().normalize().multiplyScalar(projectile.damage * 0.055);
+      const destroyedBricks = projectile.destroysStructures
+        ? structure.destroyAll(impulse)
+        : structure.damageAt(
+            projectile.mesh.position,
+            Math.max(1.2, projectile.blastRadius),
+            projectile.damage,
+            impulse,
+          );
       if (destroyedBricks <= 0) {
         continue;
       }

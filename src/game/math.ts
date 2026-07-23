@@ -89,6 +89,25 @@ export function terrainHeight(x: number, z: number): number {
   return height;
 }
 
+export function terrainLineOfSight(
+  from: Vector3,
+  to: Vector3,
+  clearance = 0.35,
+): boolean {
+  const horizontalDistance = Math.hypot(to.x - from.x, to.z - from.z);
+  const steps = Math.min(24, Math.max(2, Math.ceil(horizontalDistance / 10)));
+  for (let step = 1; step < steps; step += 1) {
+    const progress = step / steps;
+    const x = MathUtils.lerp(from.x, to.x, progress);
+    const z = MathUtils.lerp(from.z, to.z, progress);
+    const lineHeight = MathUtils.lerp(from.y, to.y, progress);
+    if (terrainHeight(x, z) + clearance >= lineHeight) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function sculptTerrain(kind: TerrainStampKind, x: number, z: number): number {
   const stamp: TerrainStamp = kind === 'mountain'
     ? { kind, x, z, radius: 34, strength: 18 }

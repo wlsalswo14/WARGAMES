@@ -1,4 +1,11 @@
-import type { FactionDefinition, FactionId, UnitKind, UnitStats } from './types';
+import type {
+  FactionDefinition,
+  FactionId,
+  ProjectileAttackMode,
+  UnitKind,
+  UnitStats,
+  WeaponStats,
+} from './types';
 
 export const FACTIONS: Record<FactionId, FactionDefinition> = {
   azure: {
@@ -30,9 +37,6 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: 6.8,
     turnRate: 4.8,
     range: 34,
-    reload: 0.55,
-    damage: 9,
-    projectileSpeed: 81,
     armor: 4,
     cost: 60,
     capturePower: 1,
@@ -42,9 +46,6 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: 10.2,
     turnRate: 1.25,
     range: 115,
-    reload: 3.2,
-    damage: 145,
-    projectileSpeed: 75,
     armor: 75,
     cost: 260,
     capturePower: 2,
@@ -54,9 +55,6 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: 55,
     turnRate: 0.95,
     range: 165,
-    reload: 0.16,
-    damage: 13,
-    projectileSpeed: 128,
     armor: 18,
     cost: 420,
     capturePower: 0,
@@ -66,9 +64,6 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: 29,
     turnRate: 1.5,
     range: 130,
-    reload: 0.22,
-    damage: 16,
-    projectileSpeed: 111,
     armor: 24,
     cost: 360,
     capturePower: 0,
@@ -78,14 +73,102 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     speed: 23,
     turnRate: 2.8,
     range: 72,
-    reload: 1.4,
-    damage: 34,
-    projectileSpeed: 66,
     armor: 3,
     cost: 120,
     capturePower: 0,
   },
 };
+
+const NORMAL_WEAPONS: Record<UnitKind, WeaponStats> = {
+  infantry: {
+    reload: 0.55,
+    damage: 9,
+    projectileSpeed: 81,
+    penetration: 12,
+    blastRadius: 0.8,
+    destroysStructures: false,
+  },
+  tank: {
+    reload: 0.42,
+    damage: 12,
+    projectileSpeed: 88,
+    penetration: 16,
+    blastRadius: 0.8,
+    destroysStructures: false,
+  },
+  fighter: {
+    reload: 0.16,
+    damage: 13,
+    projectileSpeed: 128,
+    penetration: 28,
+    blastRadius: 0.8,
+    destroysStructures: false,
+  },
+  helicopter: {
+    reload: 0.22,
+    damage: 16,
+    projectileSpeed: 111,
+    penetration: 20,
+    blastRadius: 0.8,
+    destroysStructures: false,
+  },
+  drone: {
+    reload: 0.5,
+    damage: 10,
+    projectileSpeed: 90,
+    penetration: 12,
+    blastRadius: 0.8,
+    destroysStructures: false,
+  },
+};
+
+const SPECIAL_WEAPONS: Partial<Record<UnitKind, WeaponStats>> = {
+  tank: {
+    reload: 7.5,
+    damage: 520,
+    projectileSpeed: 68,
+    penetration: 280,
+    blastRadius: 12,
+    destroysStructures: true,
+  },
+  fighter: {
+    reload: 6,
+    damage: 360,
+    projectileSpeed: 105,
+    penetration: 170,
+    blastRadius: 10,
+    destroysStructures: true,
+  },
+  helicopter: {
+    reload: 7,
+    damage: 420,
+    projectileSpeed: 82,
+    penetration: 190,
+    blastRadius: 11,
+    destroysStructures: true,
+  },
+  drone: {
+    reload: 9,
+    damage: 700,
+    projectileSpeed: 0,
+    penetration: 300,
+    blastRadius: 15,
+    destroysStructures: true,
+  },
+};
+
+export function getWeaponStats(
+  kind: UnitKind,
+  mode: ProjectileAttackMode,
+): WeaponStats | null {
+  return mode === 'special'
+    ? SPECIAL_WEAPONS[kind] ?? null
+    : NORMAL_WEAPONS[kind];
+}
+
+export function getDroneSuicideStats(): WeaponStats {
+  return SPECIAL_WEAPONS.drone as WeaponStats;
+}
 
 export const WORLD = {
   chunkSize: 96,

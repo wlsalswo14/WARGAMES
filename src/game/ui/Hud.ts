@@ -20,8 +20,8 @@ export class Hud {
   readonly root: HTMLDivElement;
   private readonly modeBadge: HTMLDivElement;
   private readonly resourcesLabel: HTMLElement;
-  private readonly statsLabel: HTMLElement;
-  private readonly windLabel: HTMLElement;
+  private readonly outpostStatsLabel: HTMLElement;
+  private readonly unitStatsLabel: HTMLElement;
   private readonly factionPanel: HTMLDivElement;
   private readonly relationList: HTMLDivElement;
   private readonly factionName: HTMLElement;
@@ -55,8 +55,8 @@ export class Hud {
         <div class="mode-badge">GOD EYE</div>
         <div class="status-strip">
           <span>자원 <b data-ui="resources">0</b></span>
-          <span>풍향 <b data-ui="wind">--</b></span>
-          <span><b data-ui="stats">0 UNIT · 0 FPS</b></span>
+          <span>거점 <b data-ui="outpost-stats">청람 0 · 적월 0 · 황토 0 · 중립 0</b></span>
+          <span>병력 <b data-ui="unit-stats">청람 0 · 적월 0 · 황토 0</b></span>
         </div>
       </div>
       <section class="faction-panel">
@@ -87,7 +87,8 @@ export class Hud {
       <div class="controls controls-possession hidden">
         <b>WASD/방향키</b> 전후좌우 · <b>마우스</b> 방향 전환<br />
         <b>전투기 W/S</b> 가속/감속 · <b>A/D</b> 좌우 이동<br />
-        <b>좌클릭</b> 사격 · <b>Space/Ctrl</b> 상승/하강<br />
+        <b>좌클릭</b> 일반공격 · <b>우클릭</b> 특수공격/드론 자폭<br />
+        <b>Space/Ctrl</b> 상승/하강<br />
         <b>V</b> 1·3인칭 · <b>G 또는 Esc</b> 신 모드 복귀
       </div>
       <div class="damage-vignette"></div>
@@ -113,8 +114,8 @@ export class Hud {
 
     this.modeBadge = this.require('[class="mode-badge"]');
     this.resourcesLabel = this.require('[data-ui="resources"]');
-    this.statsLabel = this.require('[data-ui="stats"]');
-    this.windLabel = this.require('[data-ui="wind"]');
+    this.outpostStatsLabel = this.require('[data-ui="outpost-stats"]');
+    this.unitStatsLabel = this.require('[data-ui="unit-stats"]');
     this.factionPanel = this.require('[class="faction-panel"]');
     this.relationList = this.require('[data-ui="relation-list"]');
     this.factionName = this.require('[data-ui="faction-name"]');
@@ -202,14 +203,18 @@ export class Hud {
     this.resourcesLabel.textContent = Math.floor(amount).toString();
   }
 
-  setWind(x: number, z: number): void {
-    const direction = Math.atan2(x, z) * (180 / Math.PI);
-    const normalized = (direction + 360) % 360;
-    this.windLabel.textContent = `${normalized.toFixed(0)}° ${Math.hypot(x, z).toFixed(1)}m/s`;
-  }
-
   setStats(stats: BattlefieldStats): void {
-    this.statsLabel.textContent = `${stats.unitCount} UNIT · ${stats.projectileCount} SHOT · ${stats.fps} FPS`;
+    this.outpostStatsLabel.textContent = [
+      `청람 ${stats.outpostCounts.azure}`,
+      `적월 ${stats.outpostCounts.crimson}`,
+      `황토 ${stats.outpostCounts.amber}`,
+      `중립 ${stats.neutralOutposts}`,
+    ].join(' · ');
+    this.unitStatsLabel.textContent = [
+      `청람 ${stats.unitCounts.azure}`,
+      `적월 ${stats.unitCounts.crimson}`,
+      `황토 ${stats.unitCounts.amber}`,
+    ].join(' · ');
   }
 
   setSelection(unit: Unit | null): void {
@@ -221,9 +226,16 @@ export class Hud {
     this.selectionFaction.textContent = FACTIONS[unit.faction].name;
     this.selectionFaction.style.color = FACTIONS[unit.faction].accent;
     this.selectionType.textContent = unit.possessed ? '직접 조종 중' : unit.order ? this.orderLabel(unit.order.type) : '대기';
+    const specialState = unit.kind === 'infantry'
+      ? ''
+      : unit.specialReloadTimer > 0
+        ? ` · 특수 ${unit.specialReloadTimer.toFixed(1)}초`
+        : unit.kind === 'drone'
+          ? ' · 자폭 준비'
+          : ' · 특수 준비';
     this.selectionHealth.textContent = unit.destroyed
       ? '파괴됨'
-      : `${Math.ceil(unit.health)} / ${unit.stats.maxHealth}${unit.immobilizedTimer > 0 ? ' · 궤도 위험' : ''}`;
+      : `${Math.ceil(unit.health)} / ${unit.stats.maxHealth}${unit.immobilizedTimer > 0 ? ' · 궤도 위험' : ''}${specialState}`;
     this.healthBar.style.setProperty('--health', `${Math.max(0, (unit.health / unit.stats.maxHealth) * 100)}%`);
   }
 

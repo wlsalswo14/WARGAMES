@@ -1,4 +1,5 @@
 import {
+  Box3,
   BoxGeometry,
   DynamicDrawUsage,
   Group,
@@ -41,6 +42,7 @@ export class BrickStructure {
   private supportTotal = 0;
   private supportRemaining = 0;
   private collapseTriggered = false;
+  private readonly localBounds = new Box3();
   private readonly hiddenMatrix = new Matrix4();
 
   constructor(
@@ -100,6 +102,10 @@ export class BrickStructure {
       }
     }
     this.aliveBrickCount = descriptors.length;
+    for (const descriptor of descriptors) {
+      this.localBounds.expandByPoint(descriptor.position);
+    }
+    this.localBounds.expandByScalar(1);
     const matrix = new Matrix4();
     for (let materialIndex = 0; materialIndex < materialPalette.length; materialIndex += 1) {
       const batchDescriptors = descriptors.filter(
@@ -146,6 +152,16 @@ export class BrickStructure {
     return this.aliveBrickCount / this.bricks.length;
   }
 
+  containsWorldPoint(worldPoint: Vector3, padding = 0): boolean {
+    const localPoint = this.root.worldToLocal(worldPoint.clone());
+    return localPoint.x >= this.localBounds.min.x - padding
+      && localPoint.x <= this.localBounds.max.x + padding
+      && localPoint.y >= this.localBounds.min.y - padding
+      && localPoint.y <= this.localBounds.max.y + padding
+      && localPoint.z >= this.localBounds.min.z - padding
+      && localPoint.z <= this.localBounds.max.z + padding;
+  }
+
   damageAt(worldPoint: Vector3, radius: number, damage: number, impulse: Vector3): number {
     let destroyedCount = 0;
     const localPoint = this.root.worldToLocal(worldPoint.clone());
@@ -172,6 +188,24 @@ export class BrickStructure {
       this.triggerCollapse(worldPoint);
     }
     this.destroyed = this.aliveBrickCount === 0;
+    return destroyedCount;
+  }
+
+  destroyAll(impulse: Vector3): number {
+    let destroyedCount = 0;
+    for (const brick of this.bricks) {
+      if (!brick.alive) {
+        continue;
+      }
+      const outward = brick.position.clone().normalize();
+      this.breakBrick(
+        brick,
+        outward.multiplyScalar(4).add(impulse),
+      );
+      destroyedCount += 1;
+    }
+    this.collapseTriggered = true;
+    this.destroyed = true;
     return destroyedCount;
   }
 
@@ -210,6 +244,9 @@ export class BrickStructure {
     this.hiddenMatrix.setPosition(brick.position);
     brick.batch.setMatrixAt(brick.instanceIndex, this.hiddenMatrix);
     brick.batch.instanceMatrix.needsUpdate = true;
+    if (this.rubble.length >= WORLD.maxRubble) {
+      return;
+    }
     const rubbleMesh = new Mesh(brick.batch.geometry, brick.batch.material);
     rubbleMesh.position.copy(brick.position);
     rubbleMesh.scale.multiplyScalar(0.9);

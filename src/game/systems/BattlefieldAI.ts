@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { FACTIONS } from '../config';
-import type { FactionId } from '../types';
+import { terrainLineOfSight } from '../math';
+import type { AttackMode, FactionId } from '../types';
 import type { Unit } from '../entities/Unit';
 import type { Outpost } from '../entities/Outpost';
 import type { DiplomacySystem } from './DiplomacySystem';
@@ -17,6 +18,8 @@ export class BattlefieldAI {
   private readonly targetSearchCooldowns = new Map<string, number>();
   private readonly objectiveAssignments = new Map<string, string>();
   private readonly scratch = new Vector3();
+  private readonly lineStart = new Vector3();
+  private readonly lineEnd = new Vector3();
   private readonly onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void;
   private cacheCleanupTimer = 5;
 
@@ -33,7 +36,7 @@ export class BattlefieldAI {
     outposts: Outpost[],
     diplomacy: DiplomacySystem,
     wind: Vector3,
-    fire: (unit: Unit, target: Vector3) => void,
+    fire: (unit: Unit, target: Vector3, mode: AttackMode) => void,
   ): void {
     this.updateCommanders(delta, units, outposts);
     const unitsById = new Map(units.map((unit) => [unit.id, unit]));
@@ -92,9 +95,26 @@ export class BattlefieldAI {
         unit.targetId = target.id;
         const distance = unit.position.distanceTo(target.position);
         unit.faceTarget(target.position, delta);
-        if (distance <= unit.stats.range && unit.canFire()) {
-          fire(unit, target.position.clone().add(new Vector3(0, target.collisionRadius * 0.45, 0)));
-          continue;
+        const normalReady = unit.canFire('normal');
+        const specialReady = unit.kind !== 'infantry' && unit.canFire('special');
+        if (
+          distance <= unit.stats.range
+          && (normalReady || specialReady)
+          && this.hasTerrainLineOfSight(unit, target)
+        ) {
+          const aimPoint = target.position.clone().add(
+            new Vector3(0, target.collisionRadius * 0.45, 0),
+          );
+          if (unit.kind === 'drone' && specialReady && distance <= 8) {
+            fire(unit, aimPoint, 'suicide');
+            continue;
+          } else if (specialReady && unit.kind !== 'drone') {
+            fire(unit, aimPoint, 'special');
+            continue;
+          } else if (normalReady) {
+            fire(unit, aimPoint, 'normal');
+            continue;
+          }
         }
         const preferredRange = unit.kind === 'tank' ? unit.stats.range * 0.62 : unit.stats.range * 0.42;
         if (distance > preferredRange) {
@@ -209,6 +229,14 @@ export class BattlefieldAI {
     return !candidate.destroyed
       && diplomacy.isHostile(unit.faction, candidate.faction)
       && unit.position.distanceToSquared(candidate.position) < Math.pow(unit.stats.range * 3.1, 2);
+  }
+
+  private hasTerrainLineOfSight(unit: Unit, target: Unit): boolean {
+    this.lineStart.copy(unit.position);
+    this.lineStart.y += Math.max(1.1, unit.collisionRadius * 0.55);
+    this.lineEnd.copy(target.position);
+    this.lineEnd.y += Math.max(1.1, target.collisionRadius * 0.45);
+    return terrainLineOfSight(this.lineStart, this.lineEnd);
   }
 
   private findObjective(

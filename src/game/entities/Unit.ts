@@ -12,7 +12,13 @@ import {
 } from 'three';
 import { FACTIONS, UNIT_STATS } from '../config';
 import { clamp, flatForward, shortestAngle, terrainHeight } from '../math';
-import type { CommandOrder, DamageResult, FactionId, UnitKind } from '../types';
+import type {
+  AttackMode,
+  CommandOrder,
+  DamageResult,
+  FactionId,
+  UnitKind,
+} from '../types';
 import { createUnitModel } from './BrickFactory';
 
 let nextUnitId = 1;
@@ -33,6 +39,7 @@ export class Unit {
   throttle = 0;
   altitudeVelocity = 0;
   reloadTimer = 0;
+  specialReloadTimer = 0;
   order: CommandOrder | null = null;
   targetId: string | null = null;
   destroyed = false;
@@ -149,6 +156,7 @@ export class Unit {
 
   update(delta: number, elapsed: number): void {
     this.reloadTimer = Math.max(0, this.reloadTimer - delta);
+    this.specialReloadTimer = Math.max(0, this.specialReloadTimer - delta);
     this.immobilizedTimer = Math.max(0, this.immobilizedTimer - delta);
     this.detectedTimer = Math.max(0, this.detectedTimer - delta);
 
@@ -334,12 +342,17 @@ export class Unit {
     return direction.applyQuaternion(Unit.tempQuaternion).normalize();
   }
 
-  canFire(): boolean {
-    return !this.destroyed && this.reloadTimer <= 0;
+  canFire(mode: AttackMode = 'normal'): boolean {
+    const timer = mode === 'normal' ? this.reloadTimer : this.specialReloadTimer;
+    return !this.destroyed && timer <= 0;
   }
 
-  markFired(): void {
-    this.reloadTimer = this.stats.reload;
+  markFired(mode: AttackMode, reload: number): void {
+    if (mode === 'normal') {
+      this.reloadTimer = reload;
+    } else {
+      this.specialReloadTimer = reload;
+    }
   }
 
   takeHit(

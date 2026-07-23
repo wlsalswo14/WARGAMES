@@ -56,7 +56,7 @@ canvas {
   top: 18px;
   left: 50%;
   display: flex;
-  min-width: min(720px, calc(100vw - 36px));
+  width: min(1080px, calc(100vw - 36px));
   justify-content: space-between;
   align-items: center;
   gap: 18px;
