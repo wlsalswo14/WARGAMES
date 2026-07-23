@@ -649,7 +649,7 @@ export class BrickWarfare {
       this.aimPitch = clamp(this.aimPitch - movementY * 0.0019, -1.1, 0.78);
       return;
     }
-    this.godAzimuth += movementX * 0.0023;
+    this.godAzimuth -= movementX * 0.0023;
     this.godPitch = clamp(this.godPitch + movementY * 0.0019, -1.3, 1.1);
   }
 

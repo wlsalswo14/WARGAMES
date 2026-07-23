@@ -88,7 +88,7 @@ export class Hud {
       </div>
       <div class="crosshair hidden"></div>
       <div class="controls controls-god">
-        <b>투명 관찰자</b> · <b>마우스</b> 자유 시점 · 상하 반전<br />
+        <b>투명 관찰자</b> · <b>마우스</b> 자유 시점 · 좌우/상하 반전<br />
         <b>W/S</b> 전후 · <b>A/D</b> 좌우 · <b>Space/Ctrl</b> 상승/하강<br />
         <b>Shift</b> 가속 · <b>휠</b> 이동 속도 · <b>우클릭</b> 명령<br />
         <b>Esc</b> 해제 · <b>화면 클릭</b> 다시 고정<br />
