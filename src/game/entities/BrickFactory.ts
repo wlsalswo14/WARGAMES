@@ -24,6 +24,8 @@ const glassMaterial = new MeshStandardMaterial({
 function factionMaterial(faction: FactionId, shade = 1): MeshStandardMaterial {
   const material = new MeshStandardMaterial({
     color: FACTIONS[faction].color,
+    emissive: FACTIONS[faction].color,
+    emissiveIntensity: 0.16,
     roughness: 0.64,
     metalness: 0.18,
   });

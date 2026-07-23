@@ -21,6 +21,21 @@ interface TerrainChunk {
   z: number;
   group: Group;
   terrain: Mesh;
+  trunks: InstancedMesh;
+  crowns: InstancedMesh;
+  trees: TreeRecord[];
+}
+
+interface TreeRecord {
+  key: string;
+  index: number;
+  worldPosition: Vector3;
+  localX: number;
+  localZ: number;
+  trunkY: number;
+  crownY: number;
+  scale: number;
+  destroyed: boolean;
 }
 
 export class BattlefieldWorld {
@@ -28,6 +43,7 @@ export class BattlefieldWorld {
   readonly terrainMeshes: Mesh[] = [];
   readonly wind = new Vector3(1.2, 0, -0.55);
   private readonly chunks = new Map<string, TerrainChunk>();
+  private readonly destroyedTreeKeys = new Set<string>();
   private readonly terrainMaterial = new MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
@@ -45,6 +61,34 @@ export class BattlefieldWorld {
 
   get chunkCount(): number {
     return this.chunks.size;
+  }
+
+  destroyTrees(position: Vector3, radius: number): Array<{ position: Vector3; scale: number }> {
+    const destroyed: Array<{ position: Vector3; scale: number }> = [];
+    const matrix = new Matrix4();
+    for (const chunk of this.chunks.values()) {
+      let changed = false;
+      for (const tree of chunk.trees) {
+        if (tree.destroyed || tree.worldPosition.distanceToSquared(position) > radius * radius) {
+          continue;
+        }
+        tree.destroyed = true;
+        this.destroyedTreeKeys.add(tree.key);
+        matrix.makeScale(0, 0, 0);
+        matrix.setPosition(tree.localX, tree.trunkY, tree.localZ);
+        chunk.trunks.setMatrixAt(tree.index, matrix);
+        matrix.makeScale(0, 0, 0);
+        matrix.setPosition(tree.localX, tree.crownY, tree.localZ);
+        chunk.crowns.setMatrixAt(tree.index, matrix);
+        destroyed.push({ position: tree.worldPosition.clone(), scale: tree.scale });
+        changed = true;
+      }
+      if (changed) {
+        chunk.trunks.instanceMatrix.needsUpdate = true;
+        chunk.crowns.instanceMatrix.needsUpdate = true;
+      }
+    }
+    return destroyed;
   }
 
   update(center: Vector3): void {
@@ -128,17 +172,31 @@ export class BattlefieldWorld {
     terrain.userData.isTerrain = true;
     group.add(terrain);
 
-    this.addTrees(group, chunkX, chunkZ, centerX, centerZ);
-    return { key: `${chunkX}:${chunkZ}`, x: chunkX, z: chunkZ, group, terrain };
+    const treeData = this.addTrees(group, chunkX, chunkZ, centerX, centerZ);
+    return {
+      key: `${chunkX}:${chunkZ}`,
+      x: chunkX,
+      z: chunkZ,
+      group,
+      terrain,
+      ...treeData,
+    };
   }
 
-  private addTrees(group: Group, chunkX: number, chunkZ: number, centerX: number, centerZ: number): void {
+  private addTrees(
+    group: Group,
+    chunkX: number,
+    chunkZ: number,
+    centerX: number,
+    centerZ: number,
+  ): { trunks: InstancedMesh; crowns: InstancedMesh; trees: TreeRecord[] } {
     const count = 5 + Math.floor(hash2(chunkX, chunkZ, 81) * 10);
     const trunkGeometry = new CylinderGeometry(0.35, 0.52, 3.3, 6);
     const crownGeometry = new ConeGeometry(1.9, 4.8, 7);
     const trunks = new InstancedMesh(trunkGeometry, this.trunkMaterial, count);
     const crowns = new InstancedMesh(crownGeometry, this.foliageMaterial, count);
     const matrix = new Matrix4();
+    const trees: TreeRecord[] = [];
     let visible = 0;
 
     for (let index = 0; index < count; index += 1) {
@@ -154,12 +212,27 @@ export class BattlefieldWorld {
       }
       const height = terrainHeight(worldX, worldZ);
       const scale = 0.7 + seededRandom(seed + 9) * 0.65;
-      matrix.makeScale(scale, scale, scale);
-      matrix.setPosition(localX, height + 1.65 * scale, localZ);
+      const trunkY = height + 1.65 * scale;
+      const crownY = height + 4.15 * scale;
+      const treeKey = `${chunkX}:${chunkZ}:${index}`;
+      const destroyed = this.destroyedTreeKeys.has(treeKey);
+      matrix.makeScale(destroyed ? 0 : scale, destroyed ? 0 : scale, destroyed ? 0 : scale);
+      matrix.setPosition(localX, trunkY, localZ);
       trunks.setMatrixAt(visible, matrix);
-      matrix.makeScale(scale, scale, scale);
-      matrix.setPosition(localX, height + 4.15 * scale, localZ);
+      matrix.makeScale(destroyed ? 0 : scale, destroyed ? 0 : scale, destroyed ? 0 : scale);
+      matrix.setPosition(localX, crownY, localZ);
       crowns.setMatrixAt(visible, matrix);
+      trees.push({
+        key: treeKey,
+        index: visible,
+        worldPosition: new Vector3(worldX, height, worldZ),
+        localX,
+        localZ,
+        trunkY,
+        crownY,
+        scale,
+        destroyed,
+      });
       visible += 1;
     }
     trunks.count = visible;
@@ -168,6 +241,7 @@ export class BattlefieldWorld {
     trunks.receiveShadow = true;
     crowns.castShadow = true;
     group.add(trunks, crowns);
+    return { trunks, crowns, trees };
   }
 
   private createRiver(): void {

@@ -1,4 +1,4 @@
-import { FACTIONS, UNIT_STATS } from '../config';
+import { FACTIONS } from '../config';
 import type {
   BattlefieldStats,
   DeployKind,
@@ -32,6 +32,10 @@ export class Hud {
   private readonly selectionHealth: HTMLElement;
   private readonly healthBar: HTMLElement;
   private readonly messageLog: HTMLDivElement;
+  private readonly killLog: HTMLDivElement;
+  private readonly killKicker: HTMLElement;
+  private readonly killTitle: HTMLElement;
+  private readonly killDetail: HTMLElement;
   private readonly crosshair: HTMLDivElement;
   private readonly godControls: HTMLDivElement;
   private readonly possessionControls: HTMLDivElement;
@@ -42,6 +46,7 @@ export class Hud {
   private readonly callbacks: HudCallbacks;
   private activeDeploy: DeployKind | null = null;
   private currentFaction: FactionId = 'azure';
+  private killLogTimer = 0;
 
   constructor(container: HTMLElement, callbacks: HudCallbacks) {
     this.callbacks = callbacks;
@@ -73,11 +78,18 @@ export class Hud {
       </section>
       <div class="deploy-dock"></div>
       <div class="message-log"></div>
+      <div class="kill-log hidden" data-ui="kill-log">
+        <div class="kill-log-kicker" data-ui="kill-kicker">KILL CONFIRMED</div>
+        <div class="kill-log-title" data-ui="kill-title">TARGET DESTROYED</div>
+        <div class="kill-log-detail" data-ui="kill-detail"></div>
+        <div class="kill-log-progress"></div>
+      </div>
       <div class="crosshair hidden"></div>
       <div class="controls controls-god">
-        <b>WASD</b> 카메라 · <b>QE</b> 회전 · <b>휠</b> 줌<br />
-        <b>좌클릭</b> 선택/배치 · <b>우클릭</b> 이동 명령<br />
-        <b>더블클릭</b> 유닛 빙의 · <b>F</b> 배치 진영 변경
+        <b>WASD</b> 이동 · <b>우클릭 드래그</b> 회전 · <b>휠</b> 줌<br />
+        <b>가운데 드래그</b> 화면 이동 · <b>우클릭</b> 명령<br />
+        <b>좌클릭</b> 선택/무한 배치 · <b>F</b> 진영 변경<br />
+        <b>더블클릭/Enter</b> 선택 유닛 빙의
       </div>
       <div class="controls controls-possession hidden">
         <b>WASD</b> 조종 · <b>마우스</b> 시점 · <b>좌클릭</b> 사격<br />
@@ -119,6 +131,10 @@ export class Hud {
     this.selectionHealth = this.require('[data-ui="selection-health"]');
     this.healthBar = this.require('[data-ui="health-bar"]');
     this.messageLog = this.require('[class="message-log"]');
+    this.killLog = this.require('[data-ui="kill-log"]');
+    this.killKicker = this.require('[data-ui="kill-kicker"]');
+    this.killTitle = this.require('[data-ui="kill-title"]');
+    this.killDetail = this.require('[data-ui="kill-detail"]');
     this.crosshair = this.require('[class~="crosshair"]');
     this.godControls = this.require('[class~="controls-god"]');
     this.possessionControls = this.require('[class~="controls-possession"]');
@@ -140,20 +156,20 @@ export class Hud {
     this.factionButton.addEventListener('click', callbacks.onCycleFaction);
     this.deployDock.append(this.factionButton);
 
-    const buttons: Array<{ kind: DeployKind; label: string; cost: number }> = [
-      { kind: 'infantry', label: '보병', cost: UNIT_STATS.infantry.cost },
-      { kind: 'tank', label: '전차', cost: UNIT_STATS.tank.cost },
-      { kind: 'fighter', label: '전투기', cost: UNIT_STATS.fighter.cost },
-      { kind: 'helicopter', label: '헬기', cost: UNIT_STATS.helicopter.cost },
-      { kind: 'drone', label: '드론', cost: UNIT_STATS.drone.cost },
-      { kind: 'wall', label: '장벽', cost: 45 },
-      { kind: 'trench', label: '참호', cost: 35 },
+    const buttons: Array<{ kind: DeployKind; label: string }> = [
+      { kind: 'infantry', label: '보병' },
+      { kind: 'tank', label: '전차' },
+      { kind: 'fighter', label: '전투기' },
+      { kind: 'helicopter', label: '헬기' },
+      { kind: 'drone', label: '드론' },
+      { kind: 'wall', label: '장벽' },
+      { kind: 'trench', label: '참호' },
     ];
     for (const descriptor of buttons) {
       const button = document.createElement('button');
       button.className = 'deploy-button';
       button.type = 'button';
-      button.innerHTML = `${descriptor.label}<small>${descriptor.cost} SUP</small>`;
+      button.innerHTML = `${descriptor.label}<small>∞ GOD DEPLOY</small>`;
       button.addEventListener('click', () => {
         this.setDeploy(this.activeDeploy === descriptor.kind ? null : descriptor.kind);
         callbacks.onDeploy(descriptor.kind);
@@ -270,6 +286,26 @@ export class Hud {
     window.setTimeout(() => {
       this.damageVignette.style.opacity = '0';
     }, 90);
+  }
+
+  showKillEvent(
+    playerDeath: boolean,
+    killerName: string,
+    killerColor: string,
+    victimName: string,
+    victimColor: string,
+  ): void {
+    window.clearTimeout(this.killLogTimer);
+    this.killLog.style.setProperty('--killer-color', killerColor);
+    this.killLog.style.setProperty('--victim-color', victimColor);
+    this.killKicker.textContent = playerDeath ? 'YOUR UNIT DESTROYED' : 'KILL CONFIRMED';
+    this.killTitle.textContent = playerDeath ? '빙의 유닛 전투 불능' : `${victimName} 격파`;
+    this.killDetail.textContent = `${killerName}  →  ${victimName}`;
+    this.killLog.classList.remove('hidden');
+    this.killLog.classList.toggle('player-death', playerDeath);
+    this.killLogTimer = window.setTimeout(() => {
+      this.killLog.classList.add('hidden');
+    }, 3400);
   }
 
   private require<T extends HTMLElement = HTMLElement>(selector: string): T {

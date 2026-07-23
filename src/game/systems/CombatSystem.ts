@@ -19,21 +19,31 @@ interface ImpactEffect {
   duration: number;
 }
 
+export interface CombatKillEvent {
+  victim: Unit;
+  attackerFaction: FactionId;
+  attackerUnit: Unit | null;
+  playerControlled: boolean;
+}
+
 export class CombatSystem {
   readonly projectiles: Projectile[] = [];
   private readonly effects: ImpactEffect[] = [];
   private readonly scene: Scene;
-  private readonly onDestroyed: (unit: Unit, attacker: FactionId) => void;
+  private readonly onDestroyed: (event: CombatKillEvent) => void;
   private readonly onPossessedDamage: (damage: number) => void;
+  private readonly onExplosion: (position: Vector3, radius: number, intensity: number) => void;
 
   constructor(
     scene: Scene,
-    onDestroyed: (unit: Unit, attacker: FactionId) => void,
+    onDestroyed: (event: CombatKillEvent) => void,
     onPossessedDamage: (damage: number) => void,
+    onExplosion: (position: Vector3, radius: number, intensity: number) => void,
   ) {
     this.scene = scene;
     this.onDestroyed = onDestroyed;
     this.onPossessedDamage = onPossessedDamage;
+    this.onExplosion = onExplosion;
   }
 
   fire(unit: Unit, target?: Vector3): void {
@@ -75,6 +85,13 @@ export class CombatSystem {
           projectile.damage > 80 ? 0xff7c31 : 0xffd585,
           projectile.damage > 80 ? 3.2 : 0.65,
         );
+        if (projectile.damage > 25) {
+          this.onExplosion(
+            projectile.mesh.position.clone(),
+            Math.max(3.5, projectile.blastRadius),
+            projectile.damage,
+          );
+        }
       }
       if (!projectile.alive) {
         this.scene.remove(projectile.mesh);
@@ -121,10 +138,31 @@ export class CombatSystem {
         this.onPossessedDamage(result.damage / unit.stats.maxHealth);
       }
       if (!wasDestroyed && result.destroyed) {
-        this.onDestroyed(unit, projectile.faction);
-        this.explode(projectile.mesh.position, projectile.blastRadius + 2, projectile.damage * 0.3, units, projectile.faction);
+        this.onDestroyed({
+          victim: unit,
+          attackerFaction: projectile.faction,
+          attackerUnit: units.find((candidate) => candidate.id === projectile.sourceId) ?? null,
+          playerControlled: projectile.playerControlled,
+        });
+        this.explode(
+          projectile.mesh.position,
+          projectile.blastRadius + 2,
+          projectile.damage * 0.3,
+          units,
+          projectile.faction,
+          projectile.sourceId,
+          projectile.playerControlled,
+        );
       } else if (projectile.blastRadius > 1) {
-        this.explode(projectile.mesh.position, projectile.blastRadius, projectile.damage * 0.25, units, projectile.faction);
+        this.explode(
+          projectile.mesh.position,
+          projectile.blastRadius,
+          projectile.damage * 0.25,
+          units,
+          projectile.faction,
+          projectile.sourceId,
+          projectile.playerControlled,
+        );
       }
       return;
     }
@@ -151,6 +189,11 @@ export class CombatSystem {
       }
       projectile.alive = false;
       this.createImpact(projectile.mesh.position, 0xff9f4b, 1.8 + destroyedBricks * 0.14);
+      this.onExplosion(
+        projectile.mesh.position.clone(),
+        Math.max(3, projectile.blastRadius + destroyedBricks * 0.18),
+        projectile.damage,
+      );
       if (destroyedBricks >= 5) {
         this.explode(
           projectile.mesh.position,
@@ -158,6 +201,8 @@ export class CombatSystem {
           destroyedBricks * 3,
           units,
           projectile.faction,
+          projectile.sourceId,
+          projectile.playerControlled,
         );
       }
       return;
@@ -170,8 +215,11 @@ export class CombatSystem {
     damage: number,
     units: Unit[],
     attacker: FactionId,
+    sourceId: string,
+    playerControlled: boolean,
   ): void {
     this.createImpact(position, 0xff712c, Math.max(1, radius * 0.55));
+    this.onExplosion(position.clone(), radius, damage);
     for (const unit of units) {
       if (unit.destroyed) {
         continue;
@@ -189,7 +237,12 @@ export class CombatSystem {
         this.onPossessedDamage(scaledDamage / unit.stats.maxHealth);
       }
       if (!wasDestroyed && unit.destroyed) {
-        this.onDestroyed(unit, attacker);
+        this.onDestroyed({
+          victim: unit,
+          attackerFaction: attacker,
+          attackerUnit: units.find((candidate) => candidate.id === sourceId) ?? null,
+          playerControlled,
+        });
       }
     }
   }

@@ -21,7 +21,8 @@ import { Outpost } from './entities/Outpost';
 import { Unit } from './entities/Unit';
 import { clamp, flatForward, terrainHeight } from './math';
 import { BattlefieldAI } from './systems/BattlefieldAI';
-import { CombatSystem } from './systems/CombatSystem';
+import { BrickBurstSystem } from './systems/BrickBurstSystem';
+import { CombatSystem, type CombatKillEvent } from './systems/CombatSystem';
 import { DiplomacySystem } from './systems/DiplomacySystem';
 import type {
   CameraView,
@@ -35,6 +36,14 @@ import { Hud } from './ui/Hud';
 import { BattlefieldWorld } from './world/BattlefieldWorld';
 
 const FACTION_ORDER: FactionId[] = ['azure', 'crimson', 'amber'];
+
+interface KillCamera {
+  focus: Vector3;
+  timer: number;
+  duration: number;
+  angle: number;
+  distance: number;
+}
 
 export class BrickWarfare {
   private readonly shell: HTMLDivElement;
@@ -57,6 +66,7 @@ export class BrickWarfare {
   ]);
   private readonly keys = new Set<string>();
   private readonly diplomacy = new DiplomacySystem();
+  private readonly brickBursts = new BrickBurstSystem(this.scene);
   private readonly combat: CombatSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
@@ -69,6 +79,7 @@ export class BrickWarfare {
   private simulationRunning = false;
   private godTarget = new Vector3(0, 0, 0);
   private godAzimuth = Math.PI * 0.18;
+  private godElevation = 0.79;
   private godDistance = 210;
   private aimYaw = 0;
   private aimPitch = -0.08;
@@ -79,6 +90,12 @@ export class BrickWarfare {
   private fpsFrames = 0;
   private displayedFps = 60;
   private pointerLockExpected = false;
+  private godDragButton: number | null = null;
+  private godDragMoved = false;
+  private godDragX = 0;
+  private godDragY = 0;
+  private killCamera: KillCamera | null = null;
+  private readonly explodedUnitIds = new Set<string>();
 
   constructor(container: HTMLElement) {
     this.shell = document.createElement('div');
@@ -119,8 +136,9 @@ export class BrickWarfare {
 
     this.combat = new CombatSystem(
       this.scene,
-      (unit, attacker) => this.onUnitDestroyed(unit, attacker),
+      (event) => this.onUnitDestroyed(event),
       (damage) => this.hud.flashDamage(0.25 + damage * 2.4),
+      (position, radius, intensity) => this.onWorldExplosion(position, radius, intensity),
     );
     this.ai = new BattlefieldAI((faction, strategy, reason) => {
       this.hud.notify(
@@ -251,7 +269,9 @@ export class BrickWarfare {
     const delta = Math.min(0.05, this.clock.getDelta());
     this.elapsed += delta;
     if (this.simulationRunning) {
-      this.updateSimulation(delta);
+      const simulationDelta = this.killCamera ? delta * 0.24 : delta;
+      this.updateSimulation(simulationDelta);
+      this.updateKillCamera(delta);
     }
     this.updateCamera(delta);
     this.world.update(this.mode === 'possession' && this.possessedUnit ? this.possessedUnit.position : this.godTarget);
@@ -260,9 +280,9 @@ export class BrickWarfare {
   }
 
   private updateSimulation(delta: number): void {
-    if (this.mode === 'possession' && this.possessedUnit && !this.possessedUnit.destroyed) {
+    if (!this.killCamera && this.mode === 'possession' && this.possessedUnit && !this.possessedUnit.destroyed) {
       this.updatePossessedControls(delta);
-    } else if (this.mode === 'god') {
+    } else if (!this.killCamera && this.mode === 'god') {
       this.updateGodControls(delta);
     }
 
@@ -277,17 +297,26 @@ export class BrickWarfare {
 
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
+      if (unit.destroyed && !this.explodedUnitIds.has(unit.id)) {
+        this.onUnitDestroyed({
+          victim: unit,
+          attackerFaction: unit.lastDamageFaction ?? unit.faction,
+          attackerUnit: null,
+          playerControlled: false,
+        });
+      }
     }
     for (const structure of this.structures) {
       structure.update(delta);
     }
     this.combat.update(delta, this.world.wind, this.units, this.structures);
+    this.brickBursts.update(delta);
     this.updateOutposts(delta);
     this.updateEconomy(delta);
     this.updateDiplomacy(delta);
     this.checkHeadquarters();
 
-    if (this.possessedUnit?.destroyed) {
+    if (this.possessedUnit?.destroyed && !this.killCamera) {
       this.hud.notify('빙의 연결 종료', `${this.possessedUnit.displayName}이 파괴되었습니다.`, '#ff6b63');
       this.exitPossession();
     }
@@ -314,7 +343,7 @@ export class BrickWarfare {
       return;
     }
     const forward = Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS'));
-    const turn = Number(this.keys.has('KeyA')) - Number(this.keys.has('KeyD'));
+    const turn = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'));
     const up = Number(this.keys.has('Space')) - Number(this.keys.has('ControlLeft') || this.keys.has('ControlRight'));
     if (unit.isAircraft) {
       const flightVertical = unit.kind === 'fighter' ? -up : up;
@@ -325,11 +354,22 @@ export class BrickWarfare {
   }
 
   private updateCamera(delta: number): void {
+    if (this.killCamera) {
+      this.killCamera.angle += delta * 0.52;
+      const desired = this.killCamera.focus.clone().add(new Vector3(
+        Math.sin(this.killCamera.angle) * this.killCamera.distance,
+        this.killCamera.distance * 0.42,
+        Math.cos(this.killCamera.angle) * this.killCamera.distance,
+      ));
+      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 7));
+      this.camera.lookAt(this.killCamera.focus.clone().add(new Vector3(0, 1.1, 0)));
+      return;
+    }
     if (this.mode === 'god') {
-      const horizontal = Math.cos(0.79) * this.godDistance;
+      const horizontal = Math.cos(this.godElevation) * this.godDistance;
       const desired = this.godTarget.clone().add(new Vector3(
         Math.sin(this.godAzimuth) * horizontal,
-        Math.sin(0.79) * this.godDistance,
+        Math.sin(this.godElevation) * this.godDistance,
         Math.cos(this.godAzimuth) * horizontal,
       ));
       this.camera.position.lerp(desired, 1 - Math.exp(-delta * 8));
@@ -505,11 +545,40 @@ export class BrickWarfare {
       this.pointerLockExpected = false;
     });
     document.addEventListener('mousemove', (event) => {
-      if (this.mode !== 'possession' || document.pointerLockElement !== this.renderer.domElement) {
+      if (this.mode === 'possession' && document.pointerLockElement === this.renderer.domElement) {
+        this.aimYaw -= event.movementX * 0.0023;
+        this.aimPitch = clamp(this.aimPitch - event.movementY * 0.0019, -1.1, 0.78);
         return;
       }
-      this.aimYaw -= event.movementX * 0.0023;
-      this.aimPitch = clamp(this.aimPitch - event.movementY * 0.0019, -1.1, 0.78);
+      if (this.mode !== 'god' || this.godDragButton === null) {
+        return;
+      }
+      const deltaX = event.clientX - this.godDragX;
+      const deltaY = event.clientY - this.godDragY;
+      this.godDragX = event.clientX;
+      this.godDragY = event.clientY;
+      if (Math.abs(deltaX) + Math.abs(deltaY) > 1.5) {
+        this.godDragMoved = true;
+      }
+      if (this.godDragButton === 2) {
+        this.godAzimuth -= deltaX * 0.006;
+        this.godElevation = clamp(this.godElevation - deltaY * 0.0045, 0.34, 1.22);
+      } else if (this.godDragButton === 1) {
+        const cameraForward = flatForward(this.godAzimuth + Math.PI).normalize();
+        const cameraRight = new Vector3(cameraForward.z, 0, -cameraForward.x);
+        const panScale = 0.045 + this.godDistance * 0.0017;
+        this.godTarget.addScaledVector(cameraRight, -deltaX * panScale);
+        this.godTarget.addScaledVector(cameraForward, deltaY * panScale);
+      }
+    });
+    document.addEventListener('mouseup', (event) => {
+      if (this.mode === 'god' && event.button === this.godDragButton) {
+        if (event.button === 2 && !this.godDragMoved) {
+          this.issueGodCommand(event);
+        }
+        this.godDragButton = null;
+        this.renderer.domElement.style.cursor = '';
+      }
     });
 
     this.renderer.domElement.addEventListener('wheel', (event) => {
@@ -550,6 +619,16 @@ export class BrickWarfare {
       return;
     }
 
+    if (event.button === 1 || event.button === 2) {
+      this.godDragButton = event.button;
+      this.godDragMoved = false;
+      this.godDragX = event.clientX;
+      this.godDragY = event.clientY;
+      this.renderer.domElement.style.cursor = event.button === 2 ? 'grabbing' : 'move';
+      event.preventDefault();
+      return;
+    }
+
     if (event.button === 0) {
       if (this.deployKind) {
         const point = this.pickGround(event);
@@ -559,22 +638,28 @@ export class BrickWarfare {
         return;
       }
       this.selectUnit(this.pickUnit(event));
-    } else if (event.button === 2 && this.selectedUnit) {
-      const targetUnit = this.pickUnit(event);
-      const point = targetUnit?.position.clone() ?? this.pickGround(event);
-      if (point) {
-        this.selectedUnit.order = {
-          type: targetUnit ? 'attack' : 'move',
-          destination: point,
-          targetId: targetUnit?.id,
-        };
-        this.hud.notify(
-          '전술 명령 전송',
-          `${this.selectedUnit.displayName}: ${targetUnit ? '표적 교전' : '지정 위치로 이동'}`,
-          FACTIONS[this.selectedUnit.faction].accent,
-        );
-      }
     }
+  }
+
+  private issueGodCommand(event: MouseEvent): void {
+    if (!this.selectedUnit || this.selectedUnit.destroyed) {
+      return;
+    }
+    const targetUnit = this.pickUnit(event);
+    const point = targetUnit?.position.clone() ?? this.pickGround(event);
+    if (!point) {
+      return;
+    }
+    this.selectedUnit.order = {
+      type: targetUnit ? 'attack' : 'move',
+      destination: point,
+      targetId: targetUnit?.id,
+    };
+    this.hud.notify(
+      '전술 명령 전송',
+      `${this.selectedUnit.displayName}: ${targetUnit ? '표적 교전' : '지정 위치로 이동'}`,
+      FACTIONS[this.selectedUnit.faction].accent,
+    );
   }
 
   private pickUnit(event: MouseEvent): Unit | null {
@@ -661,13 +746,6 @@ export class BrickWarfare {
     if (!kind) {
       return;
     }
-    const cost = kind === 'wall' ? 45 : kind === 'trench' ? 35 : UNIT_STATS[kind].cost;
-    const balance = this.resources.get(this.activeFaction) ?? 0;
-    if (balance < cost) {
-      this.hud.notify('보급 부족', `${cost - Math.floor(balance)} SUP가 추가로 필요합니다.`, '#ff746b');
-      return;
-    }
-    this.resources.set(this.activeFaction, balance - cost);
     if (kind === 'wall' || kind === 'trench') {
       const structure = new BrickStructure(
         point.clone().add(new Vector3(0, kind === 'trench' ? -0.72 : 0, 0)),
@@ -718,13 +796,96 @@ export class BrickWarfare {
     this.hud.setRelations(this.diplomacy.forFaction(this.activeFaction));
   }
 
-  private onUnitDestroyed(unit: Unit, attacker: FactionId): void {
-    if (Math.random() < 0.4 || unit.kind === 'tank' || unit.isAircraft) {
+  private onUnitDestroyed(event: CombatKillEvent): void {
+    if (this.explodedUnitIds.has(event.victim.id)) {
+      return;
+    }
+    this.explodedUnitIds.add(event.victim.id);
+    const baseColor = new Color(FACTIONS[event.victim.faction].color);
+    const debrisColors = [
+      baseColor.getHex(),
+      baseColor.clone().multiplyScalar(0.58).getHex(),
+      0x111820,
+      0xd7dce0,
+    ];
+    this.brickBursts.burstObject(
+      event.victim.model,
+      debrisColors,
+      event.victim.kind === 'tank' ? 16 : event.victim.isAircraft ? 14 : 11,
+    );
+    event.victim.hideDestroyedModel();
+    this.onWorldExplosion(
+      event.victim.position.clone(),
+      event.victim.collisionRadius * 2.2 + 3,
+      event.victim.stats.maxHealth,
+    );
+
+    const playerDeath = event.victim === this.possessedUnit;
+    const playerKill = event.playerControlled && !playerDeath;
+    const killerName = event.attackerUnit
+      ? `${FACTIONS[event.attackerUnit.faction].name} ${event.attackerUnit.displayName}`
+      : FACTIONS[event.attackerFaction].name;
+    const victimName = `${FACTIONS[event.victim.faction].name} ${event.victim.displayName}`;
+
+    if (playerDeath || playerKill) {
+      this.hud.showKillEvent(
+        playerDeath,
+        killerName,
+        FACTIONS[event.attackerFaction].accent,
+        victimName,
+        FACTIONS[event.victim.faction].accent,
+      );
+      this.startKillCamera(event.victim, playerDeath);
+    } else if (Math.random() < 0.4 || event.victim.kind === 'tank' || event.victim.isAircraft) {
       this.hud.notify(
         '전장 손실 보고',
-        `${FACTIONS[attacker].name}이 ${FACTIONS[unit.faction].name} ${unit.displayName}을 파괴했습니다.`,
-        FACTIONS[attacker].accent,
+        `${FACTIONS[event.attackerFaction].name}이 ${victimName}을 파괴했습니다.`,
+        FACTIONS[event.attackerFaction].accent,
       );
+    }
+  }
+
+  private onWorldExplosion(position: Vector3, radius: number, intensity: number): void {
+    const trees = this.world.destroyTrees(position, Math.max(4, radius * 1.25));
+    for (const tree of trees) {
+      this.brickBursts.burstAt(
+        tree.position.clone().add(new Vector3(0, 2.2 * tree.scale, 0)),
+        [0x3f2a1d, 0x68452a, 0x174f2b, 0x2e7b3f],
+        Math.round(8 + tree.scale * 5),
+        8 + tree.scale * 3,
+      );
+    }
+    if (intensity > 24) {
+      const count = Math.round(clamp(5 + intensity * 0.055, 6, 20));
+      this.brickBursts.burstAt(
+        position,
+        [0x5a6268, 0x7b7060, 0x343a3e, 0xd46a2f],
+        count,
+        clamp(7 + intensity * 0.025, 8, 14),
+      );
+    }
+  }
+
+  private startKillCamera(victim: Unit, playerDeath: boolean): void {
+    if (playerDeath) {
+      this.exitPossession();
+    }
+    this.killCamera = {
+      focus: victim.position.clone(),
+      timer: 3.35,
+      duration: 3.35,
+      angle: this.godAzimuth + Math.PI * 0.65,
+      distance: clamp(8 + victim.collisionRadius * 3.8, 10, 26),
+    };
+  }
+
+  private updateKillCamera(delta: number): void {
+    if (!this.killCamera) {
+      return;
+    }
+    this.killCamera.timer -= delta;
+    if (this.killCamera.timer <= 0) {
+      this.killCamera = null;
     }
   }
 

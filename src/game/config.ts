@@ -4,29 +4,29 @@ export const FACTIONS: Record<FactionId, FactionDefinition> = {
   azure: {
     id: 'azure',
     name: '청람 연방',
-    color: 0x35a8ff,
-    accent: '#56b8ff',
+    color: 0x006cff,
+    accent: '#1688ff',
     doctrine: 'mobility',
   },
   crimson: {
     id: 'crimson',
     name: '적월 공화국',
-    color: 0xff4d45,
-    accent: '#ff6961',
+    color: 0xff1828,
+    accent: '#ff3b49',
     doctrine: 'firepower',
   },
   amber: {
     id: 'amber',
     name: '황토 방위령',
-    color: 0xffb52e,
-    accent: '#ffc85c',
+    color: 0xffcf00,
+    accent: '#ffe13b',
     doctrine: 'entrenchment',
   },
 };
 
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   infantry: {
-    maxHealth: 100,
+    maxHealth: 60,
     speed: 8,
     turnRate: 4.8,
     range: 34,
@@ -38,7 +38,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     capturePower: 1,
   },
   tank: {
-    maxHealth: 520,
+    maxHealth: 280,
     speed: 12,
     turnRate: 1.25,
     range: 115,
@@ -50,7 +50,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     capturePower: 2,
   },
   fighter: {
-    maxHealth: 260,
+    maxHealth: 145,
     speed: 65,
     turnRate: 0.95,
     range: 165,
@@ -62,7 +62,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     capturePower: 0,
   },
   helicopter: {
-    maxHealth: 330,
+    maxHealth: 180,
     speed: 34,
     turnRate: 1.5,
     range: 130,
@@ -74,7 +74,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     capturePower: 0,
   },
   drone: {
-    maxHealth: 90,
+    maxHealth: 48,
     speed: 27,
     turnRate: 2.8,
     range: 72,

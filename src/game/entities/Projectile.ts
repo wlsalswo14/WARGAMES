@@ -15,6 +15,7 @@ export class Projectile {
   readonly mesh: Mesh;
   readonly sourceId: string;
   readonly faction: FactionId;
+  readonly playerControlled: boolean;
   readonly velocity: Vector3;
   readonly damage: number;
   readonly penetration: number;
@@ -25,6 +26,7 @@ export class Projectile {
   constructor(source: Unit, position: Vector3, direction: Vector3) {
     this.sourceId = source.id;
     this.faction = source.faction;
+    this.playerControlled = source.possessed;
     this.damage = source.stats.damage;
     this.penetration = source.kind === 'tank' ? 105 : source.kind === 'fighter' ? 28 : 12;
     this.blastRadius = source.kind === 'tank' ? 5.8 : source.kind === 'drone' ? 3.4 : 0.8;

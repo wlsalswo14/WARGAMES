@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  ConeGeometry,
   Group,
   MathUtils,
   Mesh,
@@ -42,6 +43,7 @@ export class Unit {
   detectedTimer = 0;
   lastDamageFaction: FactionId | null = null;
   private readonly selectionRing: Mesh;
+  private readonly factionMarker: Mesh;
   private readonly aimNode: Object3D;
   private readonly muzzleNode: Object3D;
 
@@ -71,8 +73,26 @@ export class Unit {
     );
     this.selectionRing.rotation.x = -Math.PI / 2;
     this.selectionRing.position.y = 0.12;
-    this.selectionRing.visible = false;
+    this.selectionRing.visible = true;
     this.root.add(this.selectionRing);
+
+    this.factionMarker = new Mesh(
+      new ConeGeometry(this.kind === 'infantry' ? 0.42 : 0.65, this.kind === 'infantry' ? 0.8 : 1.15, 8),
+      new MeshBasicMaterial({
+        color: FACTIONS[faction].color,
+        transparent: true,
+        opacity: 0.96,
+        depthTest: false,
+      }),
+    );
+    this.factionMarker.rotation.x = Math.PI;
+    this.factionMarker.position.y = this.kind === 'infantry'
+      ? 3.8
+      : this.kind === 'tank'
+        ? 4.8
+        : 3.4;
+    this.factionMarker.renderOrder = 20;
+    this.root.add(this.factionMarker);
   }
 
   get position(): Vector3 {
@@ -111,12 +131,20 @@ export class Unit {
 
   setSelected(selected: boolean): void {
     this.selected = selected;
-    this.selectionRing.visible = selected;
+    this.selectionRing.scale.setScalar(selected ? 1.32 : 1);
+    (this.selectionRing.material as MeshBasicMaterial).opacity = selected ? 1 : 0.42;
   }
 
   setPossessed(possessed: boolean): void {
     this.possessed = possessed;
-    this.selectionRing.visible = this.selected && !possessed;
+    this.selectionRing.scale.setScalar(possessed ? 1.48 : this.selected ? 1.32 : 1);
+    (this.selectionRing.material as MeshBasicMaterial).opacity = possessed ? 1 : this.selected ? 1 : 0.42;
+  }
+
+  hideDestroyedModel(): void {
+    this.model.visible = false;
+    this.factionMarker.visible = false;
+    this.selectionRing.visible = false;
   }
 
   update(delta: number, elapsed: number): void {
@@ -125,15 +153,6 @@ export class Unit {
     this.detectedTimer = Math.max(0, this.detectedTimer - delta);
 
     if (this.destroyed) {
-      this.velocity.y -= 12 * delta;
-      this.root.position.addScaledVector(this.velocity, delta);
-      this.model.rotation.x += delta * 0.7;
-      this.model.rotation.z += delta * 0.45;
-      const ground = terrainHeight(this.position.x, this.position.z);
-      if (this.position.y < ground) {
-        this.position.y = ground;
-        this.velocity.multiplyScalar(0.88);
-      }
       return;
     }
 
@@ -321,7 +340,7 @@ export class Unit {
     this.lastDamageFaction = attackerFaction;
     if (this.health <= 0) {
       this.destroyed = true;
-      this.velocity.add(new Vector3(0, 5, 0));
+      this.velocity.set(0, 0, 0);
       this.selectionRing.visible = false;
     }
   }
