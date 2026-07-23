@@ -253,7 +253,10 @@ export class Unit {
       const vertical = clamp(difference.y * 0.08, -0.8, 0.8);
       this.moveAircraft(this.kind === 'fighter' ? 0.08 : 0.75, turn, vertical, delta, wind);
     } else {
-      this.moveGround(distance > 2 ? 1 : 0, turn, delta);
+      const forward = distance > 2
+        ? clamp(1 - Math.abs(angle) / (Math.PI * 0.42), 0, 1)
+        : 0;
+      this.moveGround(forward, turn, delta);
     }
     return distance;
   }

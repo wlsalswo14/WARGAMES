@@ -650,7 +650,7 @@ export class BrickWarfare {
       return;
     }
     this.godAzimuth -= movementX * 0.0023;
-    this.godPitch = clamp(this.godPitch + movementY * 0.0019, -1.3, 1.1);
+    this.godPitch = clamp(this.godPitch - movementY * 0.0019, -1.3, 1.1);
   }
 
   private handlePointerLockChange(locked: boolean): void {
@@ -927,19 +927,9 @@ export class BrickWarfare {
 
     const playerDeath = event.victim === this.possessedUnit;
     const playerKill = event.playerControlled && !playerDeath;
-    const killerName = event.attackerUnit
-      ? `${FACTIONS[event.attackerUnit.faction].name} ${event.attackerUnit.displayName}`
-      : FACTIONS[event.attackerFaction].name;
     const victimName = `${FACTIONS[event.victim.faction].name} ${event.victim.displayName}`;
 
     if (playerDeath || playerKill) {
-      this.hud.showKillEvent(
-        playerDeath,
-        killerName,
-        FACTIONS[event.attackerFaction].accent,
-        victimName,
-        FACTIONS[event.victim.faction].accent,
-      );
       this.startKillCamera(event.victim, playerDeath);
     } else if (Math.random() < 0.4 || event.victim.kind === 'tank' || event.victim.isAircraft) {
       this.hud.notify(

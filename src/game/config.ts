@@ -95,7 +95,7 @@ export const WORLD = {
   battlefieldRadius: 430,
   outpostCaptureRadius: 19,
   territoryRadius: 64,
-  outpostCaptureTime: 7,
+  outpostCaptureTime: 5,
   resourceTick: 2,
   diplomacyInterval: 45,
   maxProjectiles: 180,

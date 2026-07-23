@@ -32,10 +32,6 @@ export class Hud {
   private readonly selectionHealth: HTMLElement;
   private readonly healthBar: HTMLElement;
   private readonly messageLog: HTMLDivElement;
-  private readonly killLog: HTMLDivElement;
-  private readonly killKicker: HTMLElement;
-  private readonly killTitle: HTMLElement;
-  private readonly killDetail: HTMLElement;
   private readonly crosshair: HTMLDivElement;
   private readonly godControls: HTMLDivElement;
   private readonly possessionControls: HTMLDivElement;
@@ -48,7 +44,6 @@ export class Hud {
   private currentFaction: FactionId = 'azure';
   private currentMode: GameMode = 'god';
   private pointerLocked = false;
-  private killLogTimer = 0;
 
   constructor(container: HTMLElement, callbacks: HudCallbacks) {
     this.callbacks = callbacks;
@@ -80,15 +75,9 @@ export class Hud {
       </section>
       <div class="deploy-dock"></div>
       <div class="message-log"></div>
-      <div class="kill-log hidden" data-ui="kill-log">
-        <div class="kill-log-kicker" data-ui="kill-kicker">KILL CONFIRMED</div>
-        <div class="kill-log-title" data-ui="kill-title">TARGET DESTROYED</div>
-        <div class="kill-log-detail" data-ui="kill-detail"></div>
-        <div class="kill-log-progress"></div>
-      </div>
       <div class="crosshair hidden"></div>
       <div class="controls controls-god">
-        <b>투명 관찰자</b> · <b>마우스</b> 자유 시점 · 좌우/상하 반전<br />
+        <b>투명 관찰자</b> · <b>마우스</b> 움직이는 방향으로 자유 시점<br />
         <b>W/S</b> 전후 · <b>A/D</b> 좌우 · <b>Space/Ctrl</b> 상승/하강<br />
         <b>Shift</b> 가속 · <b>휠</b> 이동 속도 · <b>우클릭</b> 명령<br />
         <b>Esc</b> 해제 · <b>화면 클릭</b> 다시 고정<br />
@@ -135,10 +124,6 @@ export class Hud {
     this.selectionHealth = this.require('[data-ui="selection-health"]');
     this.healthBar = this.require('[data-ui="health-bar"]');
     this.messageLog = this.require('[class="message-log"]');
-    this.killLog = this.require('[data-ui="kill-log"]');
-    this.killKicker = this.require('[data-ui="kill-kicker"]');
-    this.killTitle = this.require('[data-ui="kill-title"]');
-    this.killDetail = this.require('[data-ui="kill-detail"]');
     this.crosshair = this.require('[class~="crosshair"]');
     this.godControls = this.require('[class~="controls-god"]');
     this.possessionControls = this.require('[class~="controls-possession"]');
@@ -299,26 +284,6 @@ export class Hud {
     window.setTimeout(() => {
       this.damageVignette.style.opacity = '0';
     }, 90);
-  }
-
-  showKillEvent(
-    playerDeath: boolean,
-    killerName: string,
-    killerColor: string,
-    victimName: string,
-    victimColor: string,
-  ): void {
-    window.clearTimeout(this.killLogTimer);
-    this.killLog.style.setProperty('--killer-color', killerColor);
-    this.killLog.style.setProperty('--victim-color', victimColor);
-    this.killKicker.textContent = playerDeath ? 'YOUR UNIT DESTROYED' : 'KILL CONFIRMED';
-    this.killTitle.textContent = playerDeath ? '빙의 유닛 전투 불능' : `${victimName} 격파`;
-    this.killDetail.textContent = `${killerName}  →  ${victimName}`;
-    this.killLog.classList.remove('hidden');
-    this.killLog.classList.toggle('player-death', playerDeath);
-    this.killLogTimer = window.setTimeout(() => {
-      this.killLog.classList.add('hidden');
-    }, 3400);
   }
 
   private require<T extends HTMLElement = HTMLElement>(selector: string): T {

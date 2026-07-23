@@ -84,27 +84,30 @@ export class Outpost {
       }
       const distance = unit.position.distanceTo(this.root.position);
       if (distance <= WORLD.outpostCaptureRadius) {
-        presence.set(unit.faction, (presence.get(unit.faction) ?? 0) + unit.stats.capturePower);
+        presence.set(unit.faction, (presence.get(unit.faction) ?? 0) + 1);
       }
     }
-    const activeFactions = [...presence.entries()].filter(([, power]) => power > 0);
-    this.contested = activeFactions.length > 1;
-    if (activeFactions.length !== 1) {
-      this.captureProgress = Math.max(0, this.captureProgress - delta * 0.35);
+    const rankedPresence = [...presence.entries()]
+      .filter(([, count]) => count > 0)
+      .sort((left, right) => right[1] - left[1]);
+    this.contested = rankedPresence.length > 1;
+    const leader = rankedPresence[0];
+    const runnerUp = rankedPresence[1];
+    if (!leader || (runnerUp && leader[1] === runnerUp[1])) {
+      this.resetCapture();
       return null;
     }
 
-    const [faction, power] = activeFactions[0];
+    const [faction] = leader;
     if (faction === this.owner) {
-      this.captureFaction = null;
-      this.captureProgress = Math.max(0, this.captureProgress - delta);
+      this.resetCapture();
       return null;
     }
     if (this.captureFaction !== faction) {
       this.captureFaction = faction;
       this.captureProgress = 0;
     }
-    this.captureProgress += delta * Math.min(2.4, power);
+    this.captureProgress += delta;
     this.ring.material.color.set(FACTIONS[faction].color);
     this.ring.material.opacity = 0.35 + (this.captureProgress / WORLD.outpostCaptureTime) * 0.6;
     this.territory.material.color.set(FACTIONS[faction].color);
@@ -121,5 +124,14 @@ export class Outpost {
     this.beacon.material.color.set(FACTIONS[faction].color);
     this.beacon.material.emissive.set(FACTIONS[faction].color);
     return faction;
+  }
+
+  private resetCapture(): void {
+    this.captureFaction = null;
+    this.captureProgress = 0;
+    this.ring.material.color.set(this.owner ? FACTIONS[this.owner].color : 0xd7e1e8);
+    this.ring.material.opacity = 0.58;
+    this.territory.material.color.set(this.owner ? FACTIONS[this.owner].color : 0xb9c2c8);
+    this.territory.material.opacity = this.owner ? 0.2 : 0.08;
   }
 }

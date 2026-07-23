@@ -262,60 +262,6 @@ canvas {
   color: #fff;
 }
 
-.kill-log {
-  --killer-color: #56b8ff;
-  --victim-color: #ff4d45;
-  position: absolute;
-  top: 18%;
-  left: 50%;
-  width: min(520px, calc(100vw - 40px));
-  padding: 16px 22px 13px;
-  border-top: 2px solid var(--killer-color);
-  border-bottom: 1px solid color-mix(in srgb, var(--victim-color) 65%, transparent);
-  background:
-    linear-gradient(100deg, color-mix(in srgb, var(--killer-color) 23%, transparent), transparent 50%),
-    rgba(3, 10, 15, 0.92);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.5);
-  text-align: center;
-  transform: translateX(-50%);
-  animation: kill-log-in 0.22s ease-out;
-}
-
-.kill-log.player-death {
-  border-top-color: #ff3b49;
-  background:
-    linear-gradient(100deg, rgba(255, 24, 40, 0.22), transparent 55%),
-    rgba(15, 4, 6, 0.94);
-}
-
-.kill-log-kicker {
-  color: var(--killer-color);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.3em;
-}
-
-.kill-log-title {
-  margin-top: 5px;
-  color: #fff;
-  font-size: 22px;
-  font-weight: 900;
-}
-
-.kill-log-detail {
-  margin-top: 5px;
-  color: #b9cad8;
-  font-size: 11px;
-}
-
-.kill-log-progress {
-  height: 2px;
-  margin-top: 12px;
-  background: linear-gradient(90deg, var(--killer-color), var(--victim-color));
-  transform-origin: left;
-  animation: kill-log-progress 3.35s linear forwards;
-}
-
 .crosshair {
   position: absolute;
   top: 50%;
@@ -454,19 +400,6 @@ canvas {
   from {
     opacity: 0;
     transform: translateX(12px);
-  }
-}
-
-@keyframes kill-log-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -16px) scale(0.96);
-  }
-}
-
-@keyframes kill-log-progress {
-  to {
-    transform: scaleX(0);
   }
 }
 

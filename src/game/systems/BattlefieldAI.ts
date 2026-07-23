@@ -15,6 +15,7 @@ interface CommanderState {
 export class BattlefieldAI {
   private readonly commanders = new Map<FactionId, CommanderState>();
   private readonly targetSearchCooldowns = new Map<string, number>();
+  private readonly objectiveAssignments = new Map<string, string>();
   private readonly scratch = new Vector3();
   private readonly onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void;
   private cacheCleanupTimer = 5;
@@ -43,6 +44,11 @@ export class BattlefieldAI {
       for (const unitId of this.targetSearchCooldowns.keys()) {
         if (!activeIds.has(unitId)) {
           this.targetSearchCooldowns.delete(unitId);
+        }
+      }
+      for (const unitId of this.objectiveAssignments.keys()) {
+        if (!activeIds.has(unitId)) {
+          this.objectiveAssignments.delete(unitId);
         }
       }
     }
@@ -104,10 +110,10 @@ export class BattlefieldAI {
       }
 
       unit.targetId = null;
-      const objective = this.findObjective(unit, outposts);
+      const objective = this.findObjective(unit, outposts, diplomacy);
       if (objective) {
         this.scratch.copy(objective.root.position);
-        this.addFormationOffset(this.scratch, unit, 17);
+        this.addFormationOffset(this.scratch, unit, 10);
         if (unit.isAircraft) {
           this.scratch.y += unit.kind === 'fighter' ? 30 : 15;
         }
@@ -205,23 +211,54 @@ export class BattlefieldAI {
       && unit.position.distanceToSquared(candidate.position) < Math.pow(unit.stats.range * 3.1, 2);
   }
 
-  private findObjective(unit: Unit, outposts: Outpost[]): Outpost | null {
-    const strategy = this.getStrategy(unit.faction);
-    const ranked = outposts
-      .map((outpost) => {
-        const distance = unit.position.distanceToSquared(outpost.root.position);
-        const ownershipMultiplier = outpost.owner === unit.faction
-          ? strategy === 'defend' || strategy === 'entrench' ? 0.6 : 4
-          : 1;
-        return { outpost, score: distance * ownershipMultiplier };
-      })
-      .sort((left, right) => left.score - right.score);
-    if (ranked.length === 0) {
+  private findObjective(
+    unit: Unit,
+    outposts: Outpost[],
+    diplomacy: DiplomacySystem,
+  ): Outpost | null {
+    const assignedId = this.objectiveAssignments.get(unit.id);
+    const assigned = assignedId
+      ? outposts.find((outpost) => outpost.id === assignedId) ?? null
+      : null;
+    if (assigned && this.isCaptureObjective(unit, assigned, diplomacy)) {
+      return assigned;
+    }
+    this.objectiveAssignments.delete(unit.id);
+
+    const hostileOutposts = outposts.filter((outpost) => (
+      outpost.owner !== null
+      && outpost.owner !== unit.faction
+      && diplomacy.isHostile(unit.faction, outpost.owner)
+    ));
+    const neutralOutposts = outposts.filter((outpost) => outpost.owner === null);
+    const candidates = hostileOutposts.length > 0 ? hostileOutposts : neutralOutposts;
+    if (candidates.length === 0) {
       return null;
     }
+    const ranked = candidates
+      .map((outpost) => ({
+        outpost,
+        distance: unit.position.distanceToSquared(outpost.root.position),
+      }))
+      .sort((left, right) => left.distance - right.distance);
     const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
-    const selectionWindow = Math.min(8, ranked.length);
-    return ranked[unitNumber % selectionWindow].outpost;
+    const squadNumber = Math.floor(unitNumber / 4);
+    const selectionWindow = Math.min(3, ranked.length);
+    const objective = ranked[squadNumber % selectionWindow].outpost;
+    this.objectiveAssignments.set(unit.id, objective.id);
+    return objective;
+  }
+
+  private isCaptureObjective(
+    unit: Unit,
+    outpost: Outpost,
+    diplomacy: DiplomacySystem,
+  ): boolean {
+    return outpost.owner === null
+      || (
+        outpost.owner !== unit.faction
+        && diplomacy.isHostile(unit.faction, outpost.owner)
+      );
   }
 
   private addFormationOffset(destination: Vector3, unit: Unit, maximumRadius: number): Vector3 {

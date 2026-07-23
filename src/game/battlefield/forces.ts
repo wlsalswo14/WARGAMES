@@ -4,11 +4,10 @@ import type { Strategy } from '../systems/BattlefieldAI';
 export const INITIAL_FORCE: UnitKind[] = [
   'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
   'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
-  'infantry', 'infantry', 'infantry', 'infantry', 'infantry',
-  'tank', 'tank', 'tank', 'tank', 'tank', 'tank', 'tank',
-  'drone', 'drone', 'drone', 'drone',
-  'helicopter', 'helicopter',
-  'fighter', 'fighter',
+  'tank', 'tank', 'tank', 'tank',
+  'drone', 'drone',
+  'helicopter',
+  'fighter',
 ];
 
 export const TARGET_UNITS_PER_FACTION = INITIAL_FORCE.length;
