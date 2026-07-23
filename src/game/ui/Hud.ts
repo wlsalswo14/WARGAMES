@@ -92,9 +92,9 @@ export class Hud {
         <b>더블클릭/Enter</b> 선택 유닛 빙의
       </div>
       <div class="controls controls-possession hidden">
-        <b>WASD</b> 조종 · <b>마우스</b> 시점 · <b>좌클릭</b> 사격<br />
-        <b>Space/Ctrl</b> 상승/하강 · <b>V</b> 1·3인칭<br />
-        <b>G 또는 Esc</b> 신 모드 복귀
+        <b>W/S</b> 전후 · <b>A/D</b> 좌우 · <b>마우스</b> 방향 전환<br />
+        <b>좌클릭</b> 사격 · <b>Space/Ctrl</b> 상승/하강<br />
+        <b>V</b> 1·3인칭 · <b>G 또는 Esc</b> 신 모드 복귀
       </div>
       <div class="damage-vignette"></div>
       <section class="splash">
@@ -163,7 +163,10 @@ export class Hud {
       { kind: 'helicopter', label: '헬기' },
       { kind: 'drone', label: '드론' },
       { kind: 'wall', label: '장벽' },
-      { kind: 'trench', label: '참호' },
+      { kind: 'mountain', label: '산 생성' },
+      { kind: 'trench', label: '참호 굴착' },
+      { kind: 'building', label: '건물' },
+      { kind: 'tree', label: '나무' },
     ];
     for (const descriptor of buttons) {
       const button = document.createElement('button');

@@ -3,6 +3,18 @@ import { MathUtils, Vector2, Vector3 } from 'three';
 export const clamp = MathUtils.clamp;
 export const lerp = MathUtils.lerp;
 
+export type TerrainStampKind = 'mountain' | 'trench';
+
+interface TerrainStamp {
+  kind: TerrainStampKind;
+  x: number;
+  z: number;
+  radius: number;
+  strength: number;
+}
+
+const terrainStamps: TerrainStamp[] = [];
+
 export function damp(current: number, target: number, lambda: number, delta: number): number {
   return MathUtils.damp(current, target, lambda, delta);
 }
@@ -17,11 +29,33 @@ export function hash2(x: number, y: number, seed = 1917): number {
 }
 
 export function terrainHeight(x: number, z: number): number {
-  const broad = Math.sin(x * 0.012) * 2.2 + Math.cos(z * 0.014) * 1.7;
-  const detail = Math.sin((x + z) * 0.042) * 0.55 + Math.cos((x - z) * 0.035) * 0.4;
+  const broad = Math.sin(x * 0.011) * 4.8 + Math.cos(z * 0.013) * 3.6;
+  const ridge = Math.sin((x * 0.006) + (z * 0.004)) * 2.2;
+  const detail = Math.sin((x + z) * 0.042) * 1.1 + Math.cos((x - z) * 0.035) * 0.85;
   const river = Math.abs(z - Math.sin(x * 0.009) * 34);
-  const riverCut = Math.max(0, 1 - river / 18) * 4.2;
-  return broad + detail - riverCut;
+  const riverCut = Math.max(0, 1 - river / 18) * 6.5;
+  let height = broad + ridge + detail - riverCut;
+  for (const stamp of terrainStamps) {
+    const distance = Math.hypot(x - stamp.x, z - stamp.z);
+    if (distance >= stamp.radius) {
+      continue;
+    }
+    const normalized = 1 - distance / stamp.radius;
+    const smooth = normalized * normalized * (3 - 2 * normalized);
+    height += stamp.strength * smooth;
+  }
+  return height;
+}
+
+export function sculptTerrain(kind: TerrainStampKind, x: number, z: number): number {
+  const stamp: TerrainStamp = kind === 'mountain'
+    ? { kind, x, z, radius: 34, strength: 18 }
+    : { kind, x, z, radius: 17, strength: -6.5 };
+  terrainStamps.push(stamp);
+  if (terrainStamps.length > 120) {
+    terrainStamps.shift();
+  }
+  return stamp.radius;
 }
 
 export function flatForward(yaw: number): Vector3 {

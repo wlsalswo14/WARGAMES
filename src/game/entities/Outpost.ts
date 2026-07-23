@@ -1,4 +1,5 @@
 import {
+  CircleGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -20,6 +21,7 @@ export class Outpost {
   captureProgress = 0;
   contested = false;
   private readonly ring: Mesh<RingGeometry, MeshBasicMaterial>;
+  private readonly territory: Mesh<CircleGeometry, MeshBasicMaterial>;
   private readonly beacon: Mesh<CylinderGeometry, MeshStandardMaterial>;
 
   constructor(owner: FactionId | null) {
@@ -36,6 +38,21 @@ export class Outpost {
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.12;
     this.root.add(this.ring);
+
+    this.territory = new Mesh(
+      new CircleGeometry(WORLD.outpostCaptureRadius - 1, 48),
+      new MeshBasicMaterial({
+        color: owner ? FACTIONS[owner].color : 0xb9c2c8,
+        transparent: true,
+        opacity: owner ? 0.2 : 0.08,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    this.territory.rotation.x = -Math.PI / 2;
+    this.territory.position.y = 0.08;
+    this.territory.renderOrder = 1;
+    this.root.add(this.territory);
 
     const platform = new Mesh(
       new CylinderGeometry(4.5, 5.2, 0.9, 12),
@@ -90,6 +107,8 @@ export class Outpost {
     this.captureProgress += delta * Math.min(2.4, power);
     this.ring.material.color.set(FACTIONS[faction].color);
     this.ring.material.opacity = 0.35 + (this.captureProgress / WORLD.outpostCaptureTime) * 0.6;
+    this.territory.material.color.set(FACTIONS[faction].color);
+    this.territory.material.opacity = 0.12 + (this.captureProgress / WORLD.outpostCaptureTime) * 0.16;
     if (this.captureProgress < WORLD.outpostCaptureTime) {
       return null;
     }
@@ -97,6 +116,8 @@ export class Outpost {
     this.captureProgress = 0;
     this.captureFaction = null;
     this.ring.material.color.set(FACTIONS[faction].color);
+    this.territory.material.color.set(FACTIONS[faction].color);
+    this.territory.material.opacity = 0.2;
     this.beacon.material.color.set(FACTIONS[faction].color);
     this.beacon.material.emissive.set(FACTIONS[faction].color);
     return faction;

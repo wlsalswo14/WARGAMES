@@ -6,6 +6,7 @@ import {
   DirectionalLight,
   Fog,
   HemisphereLight,
+  MathUtils,
   PerspectiveCamera,
   PCFSoftShadowMap,
   Raycaster,
@@ -241,6 +242,12 @@ export class BrickWarfare {
       { x: 39, z: 3, width: 5, height: 5, depth: 5, color: 0x747d72 },
       { x: 82, z: 25, width: 6, height: 8, depth: 6, color: 0x7d6c62 },
       { x: 10, z: 30, width: 7, height: 5, depth: 5, color: 0x797f85 },
+      { x: -18, z: -58, width: 5, height: 6, depth: 5, color: 0x756c62 },
+      { x: -34, z: -22, width: 6, height: 5, depth: 4, color: 0x69747a },
+      { x: -17, z: 18, width: 4, height: 7, depth: 5, color: 0x837566 },
+      { x: 105, z: -43, width: 5, height: 6, depth: 4, color: 0x747c7e },
+      { x: 118, z: -4, width: 6, height: 5, depth: 5, color: 0x88745e },
+      { x: 106, z: 38, width: 5, height: 7, depth: 4, color: 0x6e7470 },
     ];
     for (const building of townData) {
       const position = new Vector3(building.x, terrainHeight(building.x, building.z), building.z);
@@ -343,13 +350,20 @@ export class BrickWarfare {
       return;
     }
     const forward = Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS'));
-    const turn = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'));
+    const side = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'));
     const up = Number(this.keys.has('Space')) - Number(this.keys.has('ControlLeft') || this.keys.has('ControlRight'));
+    unit.yaw = this.aimYaw;
     if (unit.isAircraft) {
       const flightVertical = unit.kind === 'fighter' ? -up : up;
-      unit.moveAircraft(forward, turn, flightVertical, delta, this.world.wind);
+      unit.moveAircraft(forward, 0, flightVertical, delta, this.world.wind);
+      const right = flatForward(this.aimYaw + Math.PI / 2);
+      const strafeScale = unit.kind === 'fighter' ? 0.35 : 0.72;
+      unit.position.addScaledVector(right, side * unit.stats.speed * strafeScale * delta);
+      unit.roll = MathUtils.damp(unit.roll, -side * 0.26, 4, delta);
     } else {
-      unit.moveGround(forward, turn, delta);
+      unit.moveGround(forward, 0, delta);
+      const right = flatForward(this.aimYaw + Math.PI / 2);
+      unit.position.addScaledVector(right, side * unit.stats.speed * 0.82 * delta);
     }
   }
 
@@ -525,8 +539,20 @@ export class BrickWarfare {
       } else if (event.code === 'Enter' && this.mode === 'god' && this.selectedUnit && !this.selectedUnit.destroyed) {
         this.enterPossession(this.selectedUnit);
       } else if (this.mode === 'god' && event.code.startsWith('Digit')) {
-        const hotkeys: DeployKind[] = ['infantry', 'tank', 'fighter', 'helicopter', 'drone', 'wall', 'trench'];
-        const index = Number.parseInt(event.code.replace('Digit', ''), 10) - 1;
+        const hotkeys: DeployKind[] = [
+          'tree',
+          'infantry',
+          'tank',
+          'fighter',
+          'helicopter',
+          'drone',
+          'wall',
+          'mountain',
+          'trench',
+          'building',
+        ];
+        const digit = Number.parseInt(event.code.replace('Digit', ''), 10);
+        const index = digit === 0 ? 0 : digit;
         if (hotkeys[index]) {
           this.toggleDeploy(hotkeys[index]);
         }
@@ -746,11 +772,44 @@ export class BrickWarfare {
     if (!kind) {
       return;
     }
-    if (kind === 'wall' || kind === 'trench') {
+    if (kind === 'mountain' || kind === 'trench') {
+      this.world.sculptTerrain(point, kind);
+      this.godTarget.y = terrainHeight(this.godTarget.x, this.godTarget.z);
+      this.hud.notify(
+        kind === 'mountain' ? '산악 지형 생성' : '참호 지형 굴착',
+        kind === 'mountain'
+          ? '지면을 상승시켜 고지대와 엄폐 능선을 만들었습니다.'
+          : '지면을 깊게 굴착해 차량과 보병이 이용할 참호를 만들었습니다.',
+        FACTIONS[this.activeFaction].accent,
+      );
+      return;
+    }
+    if (kind === 'tree') {
+      this.world.plantTree(point);
+      return;
+    }
+    if (kind === 'building') {
+      const width = 5 + Math.floor(Math.random() * 4);
+      const height = 5 + Math.floor(Math.random() * 6);
+      const depth = 4 + Math.floor(Math.random() * 3);
+      const palette = [0x6f7778, 0x827668, 0x6d7367, 0x817069];
       const structure = new BrickStructure(
-        point.clone().add(new Vector3(0, kind === 'trench' ? -0.72 : 0, 0)),
-        kind === 'wall' ? { width: 6, height: 4, depth: 1 } : { width: 8, height: 2, depth: 2 },
-        kind === 'wall' ? FACTIONS[this.activeFaction].color : 0x4f4637,
+        new Vector3(point.x, terrainHeight(point.x, point.z), point.z),
+        { width, height, depth },
+        palette[Math.floor(Math.random() * palette.length)],
+        true,
+        this.activeFaction,
+      );
+      structure.root.rotation.y = this.godAzimuth + (Math.random() - 0.5) * 0.3;
+      this.structures.push(structure);
+      this.scene.add(structure.root);
+      return;
+    }
+    if (kind === 'wall') {
+      const structure = new BrickStructure(
+        point,
+        { width: 6, height: 4, depth: 1 },
+        FACTIONS[this.activeFaction].color,
         false,
         this.activeFaction,
       );

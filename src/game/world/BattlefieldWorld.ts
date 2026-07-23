@@ -1,5 +1,6 @@
 import {
   BufferAttribute,
+  BoxGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -13,7 +14,13 @@ import {
   Vector3,
 } from 'three';
 import { WORLD } from '../config';
-import { hash2, seededRandom, terrainHeight } from '../math';
+import {
+  hash2,
+  sculptTerrain as addTerrainStamp,
+  seededRandom,
+  terrainHeight,
+  type TerrainStampKind,
+} from '../math';
 
 interface TerrainChunk {
   key: string;
@@ -38,12 +45,20 @@ interface TreeRecord {
   destroyed: boolean;
 }
 
+interface PlantedTree {
+  root: Group;
+  position: Vector3;
+  scale: number;
+  destroyed: boolean;
+}
+
 export class BattlefieldWorld {
   readonly root = new Group();
   readonly terrainMeshes: Mesh[] = [];
   readonly wind = new Vector3(1.2, 0, -0.55);
   private readonly chunks = new Map<string, TerrainChunk>();
   private readonly destroyedTreeKeys = new Set<string>();
+  private readonly plantedTrees: PlantedTree[] = [];
   private readonly terrainMaterial = new MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
@@ -61,6 +76,69 @@ export class BattlefieldWorld {
 
   get chunkCount(): number {
     return this.chunks.size;
+  }
+
+  sculptTerrain(position: Vector3, kind: TerrainStampKind): void {
+    const radius = addTerrainStamp(kind, position.x, position.z);
+    const affected: Array<{ x: number; z: number }> = [];
+    for (const chunk of this.chunks.values()) {
+      const centerX = chunk.x * WORLD.chunkSize;
+      const centerZ = chunk.z * WORLD.chunkSize;
+      const distanceX = Math.max(0, Math.abs(position.x - centerX) - WORLD.chunkSize / 2);
+      const distanceZ = Math.max(0, Math.abs(position.z - centerZ) - WORLD.chunkSize / 2);
+      if (Math.hypot(distanceX, distanceZ) <= radius + 4) {
+        affected.push({ x: chunk.x, z: chunk.z });
+      }
+    }
+    for (const descriptor of affected) {
+      const key = `${descriptor.x}:${descriptor.z}`;
+      const existing = this.chunks.get(key);
+      if (existing) {
+        this.removeChunk(existing);
+      }
+      const replacement = this.createChunk(descriptor.x, descriptor.z);
+      this.chunks.set(key, replacement);
+      this.root.add(replacement.group);
+      this.terrainMeshes.push(replacement.terrain);
+    }
+  }
+
+  plantTree(position: Vector3): void {
+    const scale = 0.85 + Math.random() * 0.55;
+    const root = new Group();
+    root.position.set(position.x, terrainHeight(position.x, position.z), position.z);
+    const trunkMaterial = new MeshStandardMaterial({ color: 0x68452a, roughness: 0.92 });
+    const leafMaterial = new MeshStandardMaterial({ color: 0x1f7638, roughness: 0.88 });
+    for (let level = 0; level < 4; level += 1) {
+      const trunk = new Mesh(new BoxGeometry(0.85, 0.75, 0.85), trunkMaterial);
+      trunk.position.y = 0.38 + level * 0.72;
+      trunk.castShadow = true;
+      trunk.receiveShadow = true;
+      root.add(trunk);
+    }
+    const leafOffsets = [
+      new Vector3(0, 3.5, 0),
+      new Vector3(-0.9, 3.25, 0),
+      new Vector3(0.9, 3.25, 0),
+      new Vector3(0, 3.25, -0.9),
+      new Vector3(0, 3.25, 0.9),
+      new Vector3(0, 4.25, 0),
+    ];
+    for (const offset of leafOffsets) {
+      const leaves = new Mesh(new BoxGeometry(1.7, 1.25, 1.7), leafMaterial);
+      leaves.position.copy(offset);
+      leaves.castShadow = true;
+      leaves.receiveShadow = true;
+      root.add(leaves);
+    }
+    root.scale.setScalar(scale);
+    this.root.add(root);
+    this.plantedTrees.push({
+      root,
+      position: root.position.clone(),
+      scale,
+      destroyed: false,
+    });
   }
 
   destroyTrees(position: Vector3, radius: number): Array<{ position: Vector3; scale: number }> {
@@ -87,6 +165,14 @@ export class BattlefieldWorld {
         chunk.trunks.instanceMatrix.needsUpdate = true;
         chunk.crowns.instanceMatrix.needsUpdate = true;
       }
+    }
+    for (const tree of this.plantedTrees) {
+      if (tree.destroyed || tree.position.distanceToSquared(position) > radius * radius) {
+        continue;
+      }
+      tree.destroyed = true;
+      tree.root.visible = false;
+      destroyed.push({ position: tree.position.clone(), scale: tree.scale });
     }
     return destroyed;
   }
@@ -120,18 +206,22 @@ export class BattlefieldWorld {
       if (required.has(key)) {
         continue;
       }
-      this.root.remove(chunk.group);
-      const terrainIndex = this.terrainMeshes.indexOf(chunk.terrain);
-      if (terrainIndex >= 0) {
-        this.terrainMeshes.splice(terrainIndex, 1);
-      }
-      chunk.group.traverse((object) => {
-        if (object instanceof Mesh || object instanceof InstancedMesh) {
-          object.geometry.dispose();
-        }
-      });
-      this.chunks.delete(key);
+      this.removeChunk(chunk);
     }
+  }
+
+  private removeChunk(chunk: TerrainChunk): void {
+    this.root.remove(chunk.group);
+    const terrainIndex = this.terrainMeshes.indexOf(chunk.terrain);
+    if (terrainIndex >= 0) {
+      this.terrainMeshes.splice(terrainIndex, 1);
+    }
+    chunk.group.traverse((object) => {
+      if (object instanceof Mesh || object instanceof InstancedMesh) {
+        object.geometry.dispose();
+      }
+    });
+    this.chunks.delete(chunk.key);
   }
 
   private createChunk(chunkX: number, chunkZ: number): TerrainChunk {
