@@ -224,6 +224,39 @@ export class BattlefieldWorld {
     return destroyed;
   }
 
+  collidesWithTree(position: Vector3, radius: number): boolean {
+    const collides = (treePosition: Vector3, scale: number): boolean => {
+      const horizontalRadius = radius + 1.6 * scale;
+      const distanceX = position.x - treePosition.x;
+      const distanceZ = position.z - treePosition.z;
+      if (distanceX * distanceX + distanceZ * distanceZ > horizontalRadius * horizontalRadius) {
+        return false;
+      }
+      const treeTop = treePosition.y + 6.7 * scale;
+      return position.y + radius >= treePosition.y
+        && position.y - radius <= treeTop;
+    };
+    for (const chunk of this.chunks.values()) {
+      const centerX = chunk.x * WORLD.chunkSize;
+      const centerZ = chunk.z * WORLD.chunkSize;
+      const chunkRadius = WORLD.chunkSize / 2 + radius + 3;
+      if (
+        Math.abs(position.x - centerX) > chunkRadius
+        || Math.abs(position.z - centerZ) > chunkRadius
+      ) {
+        continue;
+      }
+      for (const tree of chunk.trees) {
+        if (!tree.destroyed && collides(tree.worldPosition, tree.scale)) {
+          return true;
+        }
+      }
+    }
+    return this.plantedTrees.some(
+      (tree) => !tree.destroyed && collides(tree.position, tree.scale),
+    );
+  }
+
   update(center: Vector3): void {
     const centerX = Math.floor(center.x / WORLD.chunkSize);
     const centerZ = Math.floor(center.z / WORLD.chunkSize);

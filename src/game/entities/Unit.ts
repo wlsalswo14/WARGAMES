@@ -48,6 +48,7 @@ export class Unit {
   grounded = false;
   immobilizedTimer = 0;
   detectedTimer = 0;
+  terrainCollision = false;
   lastDamageFaction: FactionId | null = null;
   private readonly selectionRing: Mesh;
   private readonly factionMarker: Mesh;
@@ -201,6 +202,7 @@ export class Unit {
     if (this.destroyed) {
       return;
     }
+    this.terrainCollision = false;
     const ground = terrainHeight(this.position.x, this.position.z);
     const altitude = this.position.y - ground;
 
@@ -240,12 +242,11 @@ export class Unit {
     }
 
     this.position.addScaledVector(this.velocity, delta);
-    const minimumAltitude = ground + (this.kind === 'fighter' ? 2.3 : 1.7);
+    const collisionGround = terrainHeight(this.position.x, this.position.z);
+    const minimumAltitude = collisionGround + (this.kind === 'fighter' ? 2.3 : 1.7);
     if (this.position.y < minimumAltitude) {
+      this.terrainCollision = this.kind === 'fighter' || this.kind === 'helicopter';
       this.position.y = minimumAltitude;
-      if (this.kind === 'fighter' && this.velocity.length() > 38) {
-        this.applyRawDamage(35 * delta, null);
-      }
       this.altitudeVelocity = Math.max(0, this.altitudeVelocity);
     }
   }

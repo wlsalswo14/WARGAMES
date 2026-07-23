@@ -20,8 +20,6 @@ const CONTROL_KEYS = new Set([
   'Space',
   'ShiftLeft',
   'ShiftRight',
-  'ControlLeft',
-  'ControlRight',
 ]);
 
 export class GameInput {

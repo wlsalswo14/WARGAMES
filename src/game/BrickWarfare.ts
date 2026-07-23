@@ -104,6 +104,7 @@ export class BrickWarfare {
   private readonly combat: CombatSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
+  private readonly crashedAircraft = new Set<Unit>();
   private readonly gameLoop = new GameLoop(() => this.frame());
   private mode: GameMode = 'god';
   private cameraView: CameraView = 'thirdPerson';
@@ -369,6 +370,9 @@ export class BrickWarfare {
 
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
+    }
+    this.checkAircraftCollisions();
+    for (const unit of this.units) {
       if (unit.destroyed && !this.explodedUnitIds.has(unit.id)) {
         this.onUnitDestroyed({
           victim: unit,
@@ -424,8 +428,7 @@ export class BrickWarfare {
       Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
     ).normalize();
     const cameraRight = flatForward(this.godAzimuth + Math.PI / 2);
-    const boost = this.input.isDown('ControlLeft') || this.input.isDown('ControlRight') ? 2.2 : 1;
-    const speed = this.godMoveSpeed * boost;
+    const speed = this.godMoveSpeed;
     this.godPosition.addScaledVector(cameraForward, forwardInput * speed * delta);
     this.godPosition.addScaledVector(cameraRight, sideInput * speed * delta);
     this.godPosition.y += verticalInput * speed * delta;
@@ -445,6 +448,53 @@ export class BrickWarfare {
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
+  }
+
+  private checkAircraftCollisions(): void {
+    this.crashedAircraft.clear();
+    for (const unit of this.units) {
+      if (unit.destroyed || (unit.kind !== 'fighter' && unit.kind !== 'helicopter')) {
+        continue;
+      }
+      if (unit.terrainCollision || this.world.collidesWithTree(unit.position, unit.collisionRadius)) {
+        this.crashedAircraft.add(unit);
+        continue;
+      }
+      if (
+        this.structures.some(
+          (structure) => !structure.destroyed
+            && structure.containsWorldPoint(unit.position, unit.collisionRadius * 0.72),
+        )
+      ) {
+        this.crashedAircraft.add(unit);
+        continue;
+      }
+      if (
+        this.outposts.some((outpost) => {
+          const distanceX = unit.position.x - outpost.root.position.x;
+          const distanceZ = unit.position.z - outpost.root.position.z;
+          const collisionRadius = unit.collisionRadius + 1.2;
+          return distanceX * distanceX + distanceZ * distanceZ <= collisionRadius * collisionRadius
+            && unit.position.y - unit.collisionRadius <= outpost.root.position.y + 8.4;
+        })
+      ) {
+        this.crashedAircraft.add(unit);
+        continue;
+      }
+      for (const other of this.units) {
+        if (other === unit || other.destroyed) {
+          continue;
+        }
+        const collisionRadius = (unit.collisionRadius + other.collisionRadius) * 0.78;
+        if (unit.position.distanceToSquared(other.position) <= collisionRadius * collisionRadius) {
+          this.crashedAircraft.add(unit);
+          break;
+        }
+      }
+    }
+    for (const unit of this.crashedAircraft) {
+      unit.applyRawDamage(unit.health, unit.faction);
+    }
   }
 
   private inputAxis(
