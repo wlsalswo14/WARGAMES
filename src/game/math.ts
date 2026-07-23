@@ -15,6 +15,10 @@ interface TerrainStamp {
 
 const terrainStamps: TerrainStamp[] = [];
 
+export function resetTerrainStamps(): void {
+  terrainStamps.length = 0;
+}
+
 export function damp(current: number, target: number, lambda: number, delta: number): number {
   return MathUtils.damp(current, target, lambda, delta);
 }

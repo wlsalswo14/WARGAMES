@@ -9,11 +9,17 @@ export interface OutpostLayout {
 }
 
 export const OUTPOST_LAYOUTS: OutpostLayout[] = [
-  { x: -155, z: -92, owner: 'azure' },
-  { x: -58, z: 112, owner: 'azure' },
+  { x: -235, z: -55, owner: 'azure' },
+  { x: -165, z: 82, owner: 'azure' },
+  { x: -142, z: -125, owner: null },
+  { x: -72, z: 35, owner: null },
   { x: 0, z: 0, owner: null },
-  { x: 92, z: -108, owner: 'crimson' },
-  { x: 168, z: 78, owner: 'amber' },
+  { x: 8, z: 142, owner: null },
+  { x: 76, z: -106, owner: null },
+  { x: 145, z: -142, owner: 'crimson' },
+  { x: 214, z: -84, owner: 'crimson' },
+  { x: 132, z: 82, owner: 'amber' },
+  { x: 228, z: 148, owner: 'amber' },
 ];
 
 export interface BaseLayout {

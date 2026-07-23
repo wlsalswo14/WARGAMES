@@ -7,6 +7,7 @@ import {
   Fog,
   HemisphereLight,
   MathUtils,
+  Mesh,
   PerspectiveCamera,
   PCFSoftShadowMap,
   Raycaster,
@@ -25,18 +26,29 @@ import {
   BASE_LAYOUTS,
   FACTION_ORDER,
   OUTPOST_LAYOUTS,
-  TOWN_BUILDINGS,
 } from './battlefield/layout';
+import {
+  initialSpawnPosition,
+  reinforcementSpawnPosition,
+} from './battlefield/spawnZones';
+import { createRandomBattlefieldTheme } from './battlefield/themes';
 import { FACTIONS, WORLD } from './config';
 import { BrickStructure } from './entities/BrickStructure';
 import { Outpost } from './entities/Outpost';
 import { Unit } from './entities/Unit';
 import { GameInput } from './input/GameInput';
-import { clamp, flatForward, terrainHeight } from './math';
+import {
+  clamp,
+  flatForward,
+  resetTerrainStamps,
+  sculptTerrain as addTerrainStamp,
+  terrainHeight,
+} from './math';
 import { BattlefieldAI } from './systems/BattlefieldAI';
 import { BrickBurstSystem } from './systems/BrickBurstSystem';
 import { CombatSystem, type CombatKillEvent } from './systems/CombatSystem';
 import { DiplomacySystem } from './systems/DiplomacySystem';
+import { GameLoop } from './systems/GameLoop';
 import type {
   CameraView,
   DeployKind,
@@ -64,7 +76,8 @@ export class BrickWarfare {
   private readonly clock = new Clock();
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
-  private readonly world = new BattlefieldWorld();
+  private readonly battlefieldTheme = createRandomBattlefieldTheme();
+  private readonly world = new BattlefieldWorld(this.battlefieldTheme.palette);
   private readonly units: Unit[] = [];
   private readonly structures: BrickStructure[] = [];
   private readonly outposts: Outpost[] = [];
@@ -81,6 +94,7 @@ export class BrickWarfare {
   private readonly combat: CombatSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
+  private readonly gameLoop = new GameLoop(() => this.frame());
   private mode: GameMode = 'god';
   private cameraView: CameraView = 'thirdPerson';
   private activeFaction: FactionId = 'azure';
@@ -102,6 +116,13 @@ export class BrickWarfare {
   private displayedFps = 60;
   private killCamera: KillCamera | null = null;
   private readonly explodedUnitIds = new Set<string>();
+  private readonly destroyedAt = new Map<string, number>();
+  private readonly reinforcementSequence = new Map<FactionId, number>([
+    ['azure', 0],
+    ['crimson', 0],
+    ['amber', 0],
+  ]);
+  private unitCleanupTimer = 2;
 
   constructor(container: HTMLElement) {
     this.shell = document.createElement('div');
@@ -127,6 +148,12 @@ export class BrickWarfare {
       onStart: () => {
         this.simulationRunning = true;
         this.clock.getDelta();
+        this.input.lockPointer();
+        this.hud.notify(
+          `랜덤 전장 · ${this.battlefieldTheme.label}`,
+          this.battlefieldTheme.description,
+          '#8ed8ff',
+        );
         this.hud.notify('전장 네트워크 연결', '모든 진영의 지휘권과 빙의 권한이 활성화되었습니다.');
         this.hud.notify('작전 목표', '거점을 확보하고 적대 진영의 지휘 본부를 붕괴시키십시오.', '#ffcf5d');
       },
@@ -171,7 +198,7 @@ export class BrickWarfare {
   }
 
   start(): void {
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.gameLoop.start();
   }
 
   private setupLighting(): void {
@@ -193,6 +220,11 @@ export class BrickWarfare {
   }
 
   private createBattlefield(): void {
+    resetTerrainStamps();
+    for (const stamp of this.battlefieldTheme.terrainStamps) {
+      addTerrainStamp(stamp.kind, stamp.x, stamp.z);
+    }
+
     for (const layout of OUTPOST_LAYOUTS) {
       const position = new Vector3(
         layout.x,
@@ -224,22 +256,23 @@ export class BrickWarfare {
       this.headquarters.set(faction, headquarters);
       this.scene.add(headquarters.root);
 
-      INITIAL_FORCE.forEach((kind, index) => {
-        const group = Math.floor(index / 10);
-        const angle = ((index % 10) / 10) * Math.PI * 2 + group * 0.24;
-        const radius = kind === 'fighter' ? 54 + group * 7 : 20 + group * 13;
-        const spawn = position.clone().add(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+      const kindCounts = new Map<UnitKind, number>();
+      INITIAL_FORCE.forEach((kind) => {
+        const kindIndex = kindCounts.get(kind) ?? 0;
+        kindCounts.set(kind, kindIndex + 1);
+        const spawn = initialSpawnPosition(layout, kind, kindIndex);
         this.spawnUnit(kind, faction, spawn);
       });
     }
 
-    for (const building of TOWN_BUILDINGS) {
+    for (const building of this.battlefieldTheme.buildings) {
       const position = new Vector3(building.x, terrainHeight(building.x, building.z), building.z);
       const structure = new BrickStructure(position, building, building.color, true);
       structure.root.rotation.y = (building.x * 0.13) % 0.45;
       this.structures.push(structure);
       this.scene.add(structure.root);
     }
+    this.world.setTerritories(this.outposts);
   }
 
   private spawnUnit(kind: UnitKind, faction: FactionId, requestedPosition: Vector3): Unit {
@@ -306,6 +339,11 @@ export class BrickWarfare {
     this.updateEconomy(delta);
     this.updateDiplomacy(delta);
     this.checkHeadquarters();
+    this.unitCleanupTimer -= delta;
+    if (this.unitCleanupTimer <= 0) {
+      this.unitCleanupTimer = 2;
+      this.cleanupDestroyedUnits();
+    }
 
     if (this.possessedUnit?.destroyed && !this.killCamera) {
       this.hud.notify('빙의 연결 종료', `${this.possessedUnit.displayName}이 파괴되었습니다.`, '#ff6b63');
@@ -403,6 +441,7 @@ export class BrickWarfare {
     for (const outpost of this.outposts) {
       const capturedBy = outpost.update(delta, this.units);
       if (capturedBy) {
+        this.world.setTerritories(this.outposts);
         this.hud.notify(
           '거점 점령 완료',
           `${FACTIONS[capturedBy].name}이 ${outpost.id.toUpperCase()}의 보급망을 확보했습니다.`,
@@ -436,7 +475,9 @@ export class BrickWarfare {
     if (alive >= TARGET_UNITS_PER_FACTION || this.destroyedHeadquarters.has(faction)) {
       return;
     }
-    const spawnAnchor = this.outposts.find((outpost) => outpost.owner === faction)?.root.position
+    const sequence = this.reinforcementSequence.get(faction) ?? 0;
+    const ownedOutposts = this.outposts.filter((outpost) => outpost.owner === faction);
+    const spawnAnchor = ownedOutposts[sequence % Math.max(1, ownedOutposts.length)]?.root.position
       ?? this.headquarters.get(faction)?.root.position;
     if (!spawnAnchor) {
       return;
@@ -445,10 +486,50 @@ export class BrickWarfare {
     const missing = TARGET_UNITS_PER_FACTION - alive;
     for (let index = 0; index < missing; index += 1) {
       const kind = chooseReinforcementKind(strategy);
-      const angle = (index / Math.max(1, missing)) * Math.PI * 2;
-      const radius = 12 + (index % 3) * 5;
-      const spawn = spawnAnchor.clone().add(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+      const nextSequence = sequence + index;
+      const spawn = reinforcementSpawnPosition(spawnAnchor, nextSequence);
       this.spawnUnit(kind, faction, spawn);
+    }
+    this.reinforcementSequence.set(faction, sequence + missing);
+  }
+
+  private cleanupDestroyedUnits(): void {
+    for (let index = this.units.length - 1; index >= 0; index -= 1) {
+      const unit = this.units[index];
+      const destroyedTime = this.destroyedAt.get(unit.id);
+      if (!unit.destroyed || destroyedTime === undefined || this.elapsed - destroyedTime < 8) {
+        continue;
+      }
+      if (this.selectedUnit === unit) {
+        this.selectUnit(null);
+      }
+      if (this.possessedUnit === unit) {
+        this.exitPossession();
+      }
+      const geometries = new Set<{ dispose: () => void }>();
+      const materials = new Set<{ dispose: () => void }>();
+      unit.root.traverse((object) => {
+        if (!(object instanceof Mesh)) {
+          return;
+        }
+        geometries.add(object.geometry);
+        const meshMaterials = Array.isArray(object.material)
+          ? object.material
+          : [object.material];
+        for (const material of meshMaterials) {
+          materials.add(material);
+        }
+      });
+      unit.root.removeFromParent();
+      for (const geometry of geometries) {
+        geometry.dispose();
+      }
+      for (const material of materials) {
+        material.dispose();
+      }
+      this.units.splice(index, 1);
+      this.destroyedAt.delete(unit.id);
+      this.explodedUnitIds.delete(unit.id);
     }
   }
 
@@ -537,7 +618,7 @@ export class BrickWarfare {
       this.aimPitch = clamp(this.aimPitch - movementY * 0.0019, -1.1, 0.78);
       return;
     }
-    this.godAzimuth -= movementX * 0.0023;
+    this.godAzimuth += movementX * 0.0023;
     this.godElevation = clamp(this.godElevation - movementY * 0.0019, 0.34, 1.22);
   }
 
@@ -793,6 +874,7 @@ export class BrickWarfare {
       return;
     }
     this.explodedUnitIds.add(event.victim.id);
+    this.destroyedAt.set(event.victim.id, this.elapsed);
     const baseColor = new Color(FACTIONS[event.victim.faction].color);
     const debrisColors = [
       baseColor.getHex(),

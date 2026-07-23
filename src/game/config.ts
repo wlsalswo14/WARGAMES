@@ -94,6 +94,7 @@ export const WORLD = {
   waterLevel: -1.7,
   battlefieldRadius: 430,
   outpostCaptureRadius: 19,
+  territoryRadius: 64,
   outpostCaptureTime: 7,
   resourceTick: 2,
   diplomacyInterval: 45,

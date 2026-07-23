@@ -14,8 +14,10 @@ interface CommanderState {
 
 export class BattlefieldAI {
   private readonly commanders = new Map<FactionId, CommanderState>();
+  private readonly targetSearchCooldowns = new Map<string, number>();
   private readonly scratch = new Vector3();
   private readonly onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void;
+  private cacheCleanupTimer = 5;
 
   constructor(onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void) {
     this.onStrategy = onStrategy;
@@ -33,6 +35,17 @@ export class BattlefieldAI {
     fire: (unit: Unit, target: Vector3) => void,
   ): void {
     this.updateCommanders(delta, units, outposts);
+    const unitsById = new Map(units.map((unit) => [unit.id, unit]));
+    this.cacheCleanupTimer -= delta;
+    if (this.cacheCleanupTimer <= 0) {
+      this.cacheCleanupTimer = 5;
+      const activeIds = new Set(unitsById.keys());
+      for (const unitId of this.targetSearchCooldowns.keys()) {
+        if (!activeIds.has(unitId)) {
+          this.targetSearchCooldowns.delete(unitId);
+        }
+      }
+    }
     for (const unit of units) {
       if (unit.destroyed || unit.possessed) {
         continue;
@@ -57,7 +70,18 @@ export class BattlefieldAI {
           continue;
         }
       }
-      const target = this.findCombatTarget(unit, units, diplomacy);
+      let target = unit.targetId ? unitsById.get(unit.targetId) ?? null : null;
+      if (target && !this.isValidCombatTarget(unit, target, diplomacy)) {
+        target = null;
+      }
+      const searchCooldown = (this.targetSearchCooldowns.get(unit.id) ?? 0) - delta;
+      if (!target && searchCooldown <= 0) {
+        target = this.findCombatTarget(unit, units, diplomacy);
+        const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
+        this.targetSearchCooldowns.set(unit.id, 0.28 + (unitNumber % 7) * 0.035);
+      } else {
+        this.targetSearchCooldowns.set(unit.id, searchCooldown);
+      }
       if (target) {
         unit.targetId = target.id;
         const distance = unit.position.distanceTo(target.position);
@@ -168,6 +192,16 @@ export class BattlefieldAI {
       }
     }
     return best;
+  }
+
+  private isValidCombatTarget(
+    unit: Unit,
+    candidate: Unit,
+    diplomacy: DiplomacySystem,
+  ): boolean {
+    return !candidate.destroyed
+      && diplomacy.isHostile(unit.faction, candidate.faction)
+      && unit.position.distanceToSquared(candidate.position) < Math.pow(unit.stats.range * 3.1, 2);
   }
 
   private findObjective(unit: Unit, outposts: Outpost[]): Outpost | null {

@@ -13,7 +13,8 @@ import {
   PlaneGeometry,
   Vector3,
 } from 'three';
-import { WORLD } from '../config';
+import { FACTIONS, WORLD } from '../config';
+import type { TerrainPalette } from '../battlefield/themes';
 import {
   hash2,
   sculptTerrain as addTerrainStamp,
@@ -21,6 +22,7 @@ import {
   terrainHeight,
   type TerrainStampKind,
 } from '../math';
+import type { FactionId } from '../types';
 
 interface TerrainChunk {
   key: string;
@@ -52,6 +54,11 @@ interface PlantedTree {
   destroyed: boolean;
 }
 
+interface TerritoryInfluence {
+  position: Vector3;
+  owner: FactionId;
+}
+
 export class BattlefieldWorld {
   readonly root = new Group();
   readonly terrainMeshes: Mesh[] = [];
@@ -59,6 +66,16 @@ export class BattlefieldWorld {
   private readonly chunks = new Map<string, TerrainChunk>();
   private readonly destroyedTreeKeys = new Set<string>();
   private readonly plantedTrees: PlantedTree[] = [];
+  private readonly territories: TerritoryInfluence[] = [];
+  private readonly lowColor: Color;
+  private readonly highColor: Color;
+  private readonly riverBankColor: Color;
+  private readonly factionColors = new Map<FactionId, Color>(
+    (Object.keys(FACTIONS) as FactionId[]).map((faction) => [
+      faction,
+      new Color(FACTIONS[faction].color),
+    ]),
+  );
   private readonly terrainMaterial = new MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.92,
@@ -69,13 +86,35 @@ export class BattlefieldWorld {
   private lastCenterX = Number.NaN;
   private lastCenterZ = Number.NaN;
 
-  constructor() {
+  constructor(palette: TerrainPalette) {
+    this.lowColor = new Color(palette.low);
+    this.highColor = new Color(palette.high);
+    this.riverBankColor = new Color(palette.riverBank);
     this.root.name = 'Procedural Battlefield';
     this.createRiver();
   }
 
   get chunkCount(): number {
     return this.chunks.size;
+  }
+
+  setTerritories(sources: Array<{ root: Group; owner: FactionId | null }>): void {
+    this.territories.length = 0;
+    for (const source of sources) {
+      if (source.owner) {
+        this.territories.push({
+          position: source.root.position.clone(),
+          owner: source.owner,
+        });
+      }
+    }
+    for (const chunk of this.chunks.values()) {
+      this.applyTerrainColors(
+        chunk.terrain.geometry as PlaneGeometry,
+        chunk.x * WORLD.chunkSize,
+        chunk.z * WORLD.chunkSize,
+      );
+    }
   }
 
   sculptTerrain(position: Vector3, kind: TerrainStampKind): void {
@@ -235,10 +274,6 @@ export class BattlefieldWorld {
     const geometry = new PlaneGeometry(size, size, segments, segments);
     geometry.rotateX(-Math.PI / 2);
     const positions = geometry.getAttribute('position');
-    const colors: number[] = [];
-    const lowColor = new Color(0x354833);
-    const highColor = new Color(0x69705a);
-    const riverBank = new Color(0x554b37);
     for (let index = 0; index < positions.count; index += 1) {
       const localX = positions.getX(index);
       const localZ = positions.getZ(index);
@@ -246,15 +281,8 @@ export class BattlefieldWorld {
       const worldZ = centerZ + localZ;
       const height = terrainHeight(worldX, worldZ);
       positions.setY(index, height);
-      const riverDistance = Math.abs(worldZ - Math.sin(worldX * 0.009) * 34);
-      const color = riverDistance < 16
-        ? riverBank.clone()
-        : lowColor.clone().lerp(highColor, Math.min(1, Math.max(0, (height + 3) / 10)));
-      const variation = 0.88 + hash2(Math.round(worldX), Math.round(worldZ), 23) * 0.18;
-      color.multiplyScalar(variation);
-      colors.push(color.r, color.g, color.b);
     }
-    geometry.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+    this.applyTerrainColors(geometry, centerX, centerZ);
     geometry.computeVertexNormals();
 
     const terrain = new Mesh(geometry, this.terrainMaterial);
@@ -271,6 +299,56 @@ export class BattlefieldWorld {
       terrain,
       ...treeData,
     };
+  }
+
+  private applyTerrainColors(
+    geometry: PlaneGeometry,
+    centerX: number,
+    centerZ: number,
+  ): void {
+    const positions = geometry.getAttribute('position');
+    const colors: number[] = [];
+    for (let index = 0; index < positions.count; index += 1) {
+      const worldX = centerX + positions.getX(index);
+      const worldZ = centerZ + positions.getZ(index);
+      const height = positions.getY(index);
+      const riverDistance = Math.abs(worldZ - Math.sin(worldX * 0.009) * 34);
+      const color = riverDistance < 16
+        ? this.riverBankColor.clone()
+        : this.lowColor.clone().lerp(
+            this.highColor,
+            Math.min(1, Math.max(0, (height + 3) / 10)),
+          );
+      let strongestInfluence = 0;
+      let territoryOwner: FactionId | null = null;
+      for (const territory of this.territories) {
+        const distance = Math.hypot(
+          worldX - territory.position.x,
+          worldZ - territory.position.z,
+        );
+        const influence = Math.max(0, 1 - distance / WORLD.territoryRadius);
+        if (influence > strongestInfluence) {
+          strongestInfluence = influence;
+          territoryOwner = territory.owner;
+        }
+      }
+      if (territoryOwner) {
+        color.lerp(
+          this.factionColors.get(territoryOwner) ?? color,
+          strongestInfluence * 0.72,
+        );
+      }
+      const variation = 0.88 + hash2(Math.round(worldX), Math.round(worldZ), 23) * 0.18;
+      color.multiplyScalar(variation);
+      colors.push(color.r, color.g, color.b);
+    }
+    const existing = geometry.getAttribute('color') as BufferAttribute | undefined;
+    if (existing && existing.count === positions.count) {
+      existing.copyArray(colors);
+      existing.needsUpdate = true;
+    } else {
+      geometry.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+    }
   }
 
   private addTrees(
