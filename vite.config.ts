@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/wargames/',
+  base: '/WARGAMES/',
   build: {
     chunkSizeWarningLimit: 650,
   },

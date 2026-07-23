@@ -6,7 +6,7 @@
 - **장르:** 블록 샌드박스 RTS / TPS / FPS 하이브리드 전장 시뮬레이터
 - **한 줄 소개:** 무한히 생성되는 블록 전장을 지휘하고, 모든 진영의 유닛을 직접 조종해 전쟁의 흐름을 바꾸는 3D 전술 게임
 - **플랫폼:** PC 웹 브라우저
-- **플레이 링크:** `https://wlsalswo14.github.io/wargames/`
+- **플레이 링크:** `https://wlsalswo14.github.io/WARGAMES/`
 
 ## 2. 게임 목표
 
