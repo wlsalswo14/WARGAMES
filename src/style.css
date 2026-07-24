@@ -95,6 +95,83 @@ canvas {
   color: #fff;
 }
 
+.challenge-panel {
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  display: grid;
+  width: min(650px, calc(100vw - 560px));
+  grid-template-columns: 100px 130px 1fr 1.4fr;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(117, 202, 255, 0.2);
+  background: rgba(5, 14, 21, 0.9);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+}
+
+.challenge-panel > div {
+  min-width: 0;
+  padding: 5px 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.challenge-panel small {
+  display: block;
+  color: #8fa7ba;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.challenge-panel strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.challenge-panel > div:first-child strong {
+  color: #ffdf77;
+  font-size: 18px;
+}
+
+.command-link > span {
+  display: block;
+  height: 4px;
+  margin-top: 7px;
+  overflow: hidden;
+  background: #182834;
+}
+
+.command-link i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #367cad, #6dd5ff);
+  transition: width 0.2s linear;
+}
+
+.ai-read {
+  position: relative;
+}
+
+.ai-read strong {
+  padding-right: 38px;
+  color: #ff9b7e;
+  font-size: 11px;
+}
+
+.ai-read > b {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  color: #ff704f;
+  font-size: 11px;
+}
+
 .faction-panel {
   position: absolute;
   top: 92px;
@@ -122,6 +199,21 @@ canvas {
   padding: 5px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 11px;
+}
+
+.relation-row:is(button) {
+  width: 100%;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.relation-static {
+  padding-right: 2px;
 }
 
 .relation-hostile {
@@ -310,6 +402,23 @@ canvas {
   color: #fff;
 }
 
+.tutorial {
+  position: absolute;
+  left: 18px;
+  bottom: 94px;
+  max-width: 275px;
+  padding: 10px 12px;
+  border-left: 2px solid #ff8b63;
+  background: rgba(5, 13, 19, 0.82);
+  color: #b9c8d5;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.tutorial b {
+  color: #ffba8f;
+}
+
 .splash {
   position: absolute;
   inset: 0;
@@ -359,6 +468,49 @@ canvas {
   margin: 26px 0;
 }
 
+.mode-selector {
+  display: grid;
+  max-width: 650px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0 12px;
+}
+
+.mode-card {
+  padding: 14px;
+  border: 1px solid rgba(115, 199, 248, 0.18);
+  border-radius: 5px;
+  background: rgba(8, 25, 35, 0.72);
+  color: #bed0dc;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mode-card:hover,
+.mode-card.selected {
+  border-color: #68c8ff;
+  background: rgba(27, 70, 94, 0.76);
+  box-shadow: inset 0 0 24px rgba(71, 174, 232, 0.08);
+}
+
+.mode-card strong,
+.mode-card span {
+  display: block;
+}
+
+.mode-card strong {
+  color: #fff;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+.mode-card span {
+  margin-top: 6px;
+  color: #9fb4c3;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .feature-row span {
   padding: 7px 10px;
   border: 1px solid rgba(111, 203, 255, 0.2);
@@ -392,6 +544,68 @@ canvas {
   transition: opacity 0.12s;
 }
 
+.result-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 10, 15, 0.78);
+  backdrop-filter: blur(9px);
+  pointer-events: auto;
+}
+
+.result-card {
+  width: min(460px, calc(100vw - 32px));
+  padding: 30px;
+  border: 1px solid rgba(104, 200, 255, 0.28);
+  background: linear-gradient(155deg, #0b1c27, #071018);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+.result-card h2 {
+  margin: 8px 0;
+  color: #8bd8ff;
+  font-size: 34px;
+}
+
+.result-card p {
+  color: #aebdca;
+}
+
+.result-score {
+  margin: 22px 0;
+  color: #fff;
+  font-size: 42px;
+  font-weight: 900;
+}
+
+.result-stats {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 24px;
+  color: #9fb2c1;
+  font-size: 11px;
+}
+
+.result-stats b {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 17px;
+}
+
+.result-card button {
+  margin: 4px;
+  padding: 10px 15px;
+  border: 1px solid #56b8ff;
+  border-radius: 4px;
+  background: #17394d;
+  cursor: pointer;
+}
+
 .hidden {
   display: none !important;
 }
@@ -419,5 +633,35 @@ canvas {
   .deploy-dock {
     max-width: calc(100vw - 32px);
     overflow-x: auto;
+  }
+
+  .challenge-panel {
+    top: 78px;
+    width: calc(100vw - 36px);
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hud-challenge .faction-panel,
+  .hud-challenge .message-log {
+    top: 180px;
+  }
+
+  .tutorial {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .mode-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-panel,
+  .faction-panel {
+    display: none;
+  }
+
+  .controls {
+    display: none;
   }
 }

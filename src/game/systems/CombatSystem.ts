@@ -47,6 +47,7 @@ export class CombatSystem {
     onDestroyed: (event: CombatKillEvent) => void,
     onPossessedDamage: (damage: number) => void,
     onExplosion: (position: Vector3, radius: number) => void,
+    private readonly maxProjectiles: number = WORLD.maxProjectiles,
   ) {
     this.scene = scene;
     this.onDestroyed = onDestroyed;
@@ -63,7 +64,7 @@ export class CombatSystem {
     if (
       !weapon
       || !unit.canFire(attackMode)
-      || this.projectiles.length >= WORLD.maxProjectiles
+      || this.projectiles.length >= this.maxProjectiles
     ) {
       return false;
     }
@@ -228,7 +229,11 @@ export class CombatSystem {
     units: Unit[],
   ): void {
     for (const structure of structures) {
-      if (structure.destroyed || structure.root.position.distanceToSquared(projectile.mesh.position) > 28 * 28) {
+      const broadRadius = structure.collisionRadius + projectile.blastRadius + 3;
+      if (
+        structure.destroyed
+        || structure.root.position.distanceToSquared(projectile.mesh.position) > broadRadius * broadRadius
+      ) {
         continue;
       }
       if (!structure.containsWorldPoint(

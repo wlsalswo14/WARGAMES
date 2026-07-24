@@ -29,6 +29,10 @@ interface RubblePiece {
   life: number;
 }
 
+export interface BrickStructureOptions {
+  castShadow?: boolean;
+}
+
 let nextStructureId = 1;
 const COLLISION_AXES = ['x', 'y', 'z'] as const;
 
@@ -55,6 +59,7 @@ export class BrickStructure {
     color = 0x7f7767,
     openCenter = true,
     faction: FactionId | null = null,
+    options: BrickStructureOptions = {},
   ) {
     this.faction = faction;
     this.root.position.copy(position);
@@ -136,7 +141,7 @@ export class BrickStructure {
         batchDescriptors.length,
       );
       batch.instanceMatrix.setUsage(DynamicDrawUsage);
-      batch.castShadow = true;
+      batch.castShadow = options.castShadow ?? dimensions.height <= 36;
       batch.receiveShadow = true;
       batch.userData.structure = this;
       for (let instanceIndex = 0; instanceIndex < batchDescriptors.length; instanceIndex += 1) {

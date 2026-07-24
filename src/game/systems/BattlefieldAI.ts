@@ -13,8 +13,14 @@ interface CommanderState {
   timer: number;
 }
 
+interface PriorityObjective {
+  outpostId: string;
+  remaining: number;
+}
+
 export class BattlefieldAI {
   private readonly commanders = new Map<FactionId, CommanderState>();
+  private readonly priorityObjectives = new Map<FactionId, PriorityObjective>();
   private readonly targetSearchCooldowns = new Map<string, number>();
   private readonly objectiveAssignments = new Map<string, string>();
   private readonly scratch = new Vector3();
@@ -23,7 +29,10 @@ export class BattlefieldAI {
   private readonly onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void;
   private cacheCleanupTimer = 5;
 
-  constructor(onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void) {
+  constructor(
+    onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void,
+    private readonly activeFactions: readonly FactionId[] = ['azure', 'crimson', 'amber'],
+  ) {
     this.onStrategy = onStrategy;
     this.commanders.set('azure', { strategy: 'capture', timer: 7 });
     this.commanders.set('crimson', { strategy: 'assault', timer: 5 });
@@ -38,6 +47,12 @@ export class BattlefieldAI {
     wind: Vector3,
     fire: (unit: Unit, target: Vector3, mode: AttackMode) => void,
   ): void {
+    for (const [faction, priority] of this.priorityObjectives) {
+      priority.remaining -= delta;
+      if (priority.remaining <= 0) {
+        this.priorityObjectives.delete(faction);
+      }
+    }
     this.updateCommanders(delta, units, outposts);
     const unitsById = new Map(units.map((unit) => [unit.id, unit]));
     this.cacheCleanupTimer -= delta;
@@ -158,8 +173,16 @@ export class BattlefieldAI {
     return this.commanders.get(faction)?.strategy ?? 'capture';
   }
 
+  setPriorityObjective(faction: FactionId, outpostId: string, duration: number): void {
+    this.priorityObjectives.set(faction, {
+      outpostId,
+      remaining: duration,
+    });
+    this.objectiveAssignments.clear();
+  }
+
   private updateCommanders(delta: number, units: Unit[], outposts: Outpost[]): void {
-    for (const faction of Object.keys(FACTIONS) as FactionId[]) {
+    for (const faction of this.activeFactions) {
       const commander = this.commanders.get(faction);
       if (!commander) {
         continue;
@@ -254,6 +277,19 @@ export class BattlefieldAI {
     }
     this.objectiveAssignments.delete(unit.id);
 
+    const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
+    const squadNumber = Math.floor(unitNumber / 4);
+    const priority = this.priorityObjectives.get(unit.faction);
+    if (priority && squadNumber % 2 === 0) {
+      const priorityOutpost = outposts.find(
+        (outpost) => outpost.id === priority.outpostId,
+      );
+      if (priorityOutpost) {
+        this.objectiveAssignments.set(unit.id, priorityOutpost.id);
+        return priorityOutpost;
+      }
+    }
+
     const recoveryOutposts = needsRecovery
       ? outposts.filter((outpost) => outpost.owner !== unit.faction)
       : [];
@@ -277,8 +313,6 @@ export class BattlefieldAI {
         distance: unit.position.distanceToSquared(outpost.root.position),
       }))
       .sort((left, right) => left.distance - right.distance);
-    const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
-    const squadNumber = Math.floor(unitNumber / 4);
     const selectionWindow = Math.min(3, ranked.length);
     const objective = ranked[squadNumber % selectionWindow].outpost;
     this.objectiveAssignments.set(unit.id, objective.id);

@@ -16,11 +16,14 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { chooseReinforcementKind } from './battlefield/forces';
 import {
-  chooseReinforcementKind,
-  INITIAL_FORCE,
-  TARGET_UNITS_PER_FACTION,
-} from './battlefield/forces';
+  CHALLENGE_BASES,
+  CHALLENGE_OUTPOSTS,
+  CHALLENGE_STAGING,
+  CHALLENGE_STRUCTURES,
+  CHALLENGE_THEME,
+} from './battlefield/challengeLayout';
 import {
   BASE_LAYOUTS,
   FACTION_ORDER,
@@ -31,6 +34,12 @@ import {
   initialSpawnPosition,
   reinforcementSpawnPosition,
 } from './battlefield/spawnZones';
+import {
+  createHeadquartersPlan,
+  createPlayerBuildingPlan,
+  createStructureFromPlan,
+  type StructurePlan,
+} from './battlefield/structurePlans';
 import { createRandomBattlefieldTheme } from './battlefield/themes';
 import { FACTIONS, WORLD } from './config';
 import { BrickStructure } from './entities/BrickStructure';
@@ -44,8 +53,15 @@ import {
   sculptTerrain as addTerrainStamp,
   terrainHeight,
 } from './math';
+import {
+  getRequestedPlayMode,
+  PLAY_MODE_CONFIGS,
+  type PlayMode,
+} from './modes/PlayMode';
+import { AdaptiveDirector } from './systems/AdaptiveDirector';
 import { BattlefieldAI } from './systems/BattlefieldAI';
 import { BrickBurstSystem } from './systems/BrickBurstSystem';
+import { ChallengeSession } from './systems/ChallengeSession';
 import { CombatSystem, type CombatKillEvent } from './systems/CombatSystem';
 import { DiplomacySystem } from './systems/DiplomacySystem';
 import { GameLoop } from './systems/GameLoop';
@@ -82,11 +98,17 @@ export class BrickWarfare {
   private readonly clock = new Clock();
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
-  private readonly battlefieldTheme = createRandomBattlefieldTheme();
+  private readonly playMode = getRequestedPlayMode();
+  private readonly modeConfig = PLAY_MODE_CONFIGS[this.playMode];
+  private readonly activeFactions = this.modeConfig.activeFactions;
+  private readonly battlefieldTheme = this.playMode === 'challenge'
+    ? CHALLENGE_THEME
+    : createRandomBattlefieldTheme();
   private readonly world = new BattlefieldWorld(
     this.battlefieldTheme.palette,
     this.battlefieldTheme.treeDensity,
     this.battlefieldTheme.terrainProfile,
+    this.modeConfig.chunkRadius,
   );
   private readonly units: Unit[] = [];
   private readonly structures: BrickStructure[] = [];
@@ -94,17 +116,26 @@ export class BrickWarfare {
   private readonly headquarters = new Map<FactionId, BrickStructure>();
   private readonly destroyedHeadquarters = new Set<FactionId>();
   private readonly eliminatedFactions = new Set<FactionId>();
-  private readonly resources = new Map<FactionId, number>([
-    ['azure', 900],
-    ['crimson', 900],
-    ['amber', 900],
-  ]);
+  private readonly resources = new Map<FactionId, number>(
+    FACTION_ORDER.map((faction) => [
+      faction,
+      this.modeConfig.startingResources[faction],
+    ]),
+  );
   private readonly input: GameInput;
   private readonly diplomacy = new DiplomacySystem();
   private readonly brickBursts = new BrickBurstSystem(this.scene);
   private readonly combat: CombatSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
+  private readonly challengeSession = this.playMode === 'challenge'
+    ? new ChallengeSession({
+        duration: this.modeConfig.matchDuration ?? 420,
+        possessionDuration: this.modeConfig.possessionDuration ?? 15,
+        possessionRecharge: this.modeConfig.possessionRecharge,
+      })
+    : null;
+  private adaptiveDirector: AdaptiveDirector | null = null;
   private readonly crashedAircraft = new Set<Unit>();
   private readonly gameLoop = new GameLoop(() => this.frame());
   private mode: GameMode = 'god';
@@ -129,6 +160,8 @@ export class BrickWarfare {
   private diplomacyAccumulator = 0;
   private headquartersAccumulator = 0;
   private victoryFaction: FactionId | null = null;
+  private adaptiveSyncTimer = 0;
+  private challengeResultShown = false;
   private killCamera: KillCamera | null = null;
   private readonly explodedUnitIds = new Set<string>();
   private readonly destroyedAt = new Map<string, number>();
@@ -160,18 +193,34 @@ export class BrickWarfare {
     this.scene.add(this.world.root);
     this.setupLighting();
 
-    this.hud = new Hud(this.shell, {
+    this.hud = new Hud(this.shell, this.playMode, {
       onStart: () => {
         this.simulationRunning = true;
+        this.challengeSession?.start();
         this.clock.getDelta();
         this.input.lockPointer();
         this.hud.notify(
-          `랜덤 전장 · ${this.battlefieldTheme.label}`,
+          `전장 전개 · ${this.battlefieldTheme.label}`,
           this.battlefieldTheme.description,
           '#8ed8ff',
         );
-        this.hud.notify('전장 네트워크 연결', '모든 진영의 지휘권과 빙의 권한이 활성화되었습니다.');
-        this.hud.notify('작전 목표', '거점을 확보해 증원하고 적대 국가의 병력을 전멸시키십시오.', '#ffcf5d');
+        if (this.playMode === 'challenge') {
+          this.hud.notify(
+            '작전 목표',
+            '7분 동안 거점 점수에서 앞서거나 적 지휘 본부를 파괴하십시오.',
+            '#ffcf5d',
+          );
+          this.hud.notify(
+            '적응형 지휘 AI',
+            '우클릭 명령 패턴을 예측합니다. 표적을 바꿔 예측을 속이면 추가 점수를 얻습니다.',
+            '#ff7b63',
+          );
+        } else {
+          this.hud.notify(
+            'Sandbox 연결',
+            '모든 진영과 지형 도구를 무제한으로 사용할 수 있습니다.',
+          );
+        }
         if (this.softwareRendering) {
           this.hud.notify(
             '소프트웨어 렌더링 감지',
@@ -180,6 +229,7 @@ export class BrickWarfare {
           );
         }
       },
+      onModeSelect: (mode) => this.selectPlayMode(mode),
       onDeploy: (kind) => this.toggleDeploy(kind),
       onCycleFaction: () => this.cycleFaction(),
       onDiplomacy: (target) => this.interveneDiplomacy(target),
@@ -195,6 +245,7 @@ export class BrickWarfare {
       (event) => this.onUnitDestroyed(event),
       (damage) => this.hud.flashDamage(0.25 + damage * 2.4),
       (position, radius) => this.onWorldExplosion(position, radius),
+      this.playMode === 'challenge' ? 72 : WORLD.maxProjectiles,
     );
     this.ai = new BattlefieldAI((faction, strategy, reason) => {
       this.hud.notify(
@@ -202,7 +253,7 @@ export class BrickWarfare {
         `${this.strategyLabel(strategy)} · ${reason}`,
         FACTIONS[faction].accent,
       );
-    });
+    }, this.activeFactions);
     this.input = new GameInput(this.renderer.domElement, {
       onKeyDown: (event) => this.handleKeyDown(event),
       onMouseDown: (event) => this.handleMouseDown(event),
@@ -214,6 +265,7 @@ export class BrickWarfare {
     });
 
     this.createBattlefield();
+    this.hud.configureMode(this.modeConfig);
     this.handleResize();
     this.world.update(this.godPosition);
     this.updateDiplomacyHud();
@@ -221,6 +273,12 @@ export class BrickWarfare {
 
   start(): void {
     this.gameLoop.start();
+  }
+
+  private selectPlayMode(mode: PlayMode): void {
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', mode);
+    window.location.assign(url);
   }
 
   private setupLighting(): void {
@@ -247,7 +305,17 @@ export class BrickWarfare {
       addTerrainStamp(stamp.kind, stamp.x, stamp.z);
     }
 
-    for (const layout of OUTPOST_LAYOUTS) {
+    const outpostLayouts = this.playMode === 'challenge'
+      ? CHALLENGE_OUTPOSTS
+      : OUTPOST_LAYOUTS;
+    const baseLayouts = this.playMode === 'challenge'
+      ? CHALLENGE_BASES
+      : BASE_LAYOUTS;
+    const stagingLayouts = this.playMode === 'challenge'
+      ? CHALLENGE_STAGING
+      : STAGING_SPAWN_LAYOUTS;
+
+    for (const layout of outpostLayouts) {
       const position = new Vector3(
         layout.x,
         terrainHeight(layout.x, layout.z),
@@ -259,21 +327,22 @@ export class BrickWarfare {
       this.scene.add(outpost.root);
     }
 
-    for (const faction of FACTION_ORDER) {
-      const layout = BASE_LAYOUTS[faction];
+    for (const faction of this.activeFactions) {
+      const layout = baseLayouts[faction];
       const position = new Vector3(
         layout.x,
         terrainHeight(layout.x, layout.z),
         layout.z,
       );
-      const headquarters = new BrickStructure(
-        position,
-        { width: 10, height: 14, depth: 8 },
-        FACTIONS[faction].color,
-        true,
-        faction,
+      const headquarters = createStructureFromPlan(
+        createHeadquartersPlan(
+          faction,
+          position.x,
+          position.z,
+          layout.yaw,
+          this.playMode === 'challenge',
+        ),
       );
-      headquarters.root.rotation.y = layout.yaw;
       this.structures.push(headquarters);
       this.headquarters.set(faction, headquarters);
       this.scene.add(headquarters.root);
@@ -283,10 +352,10 @@ export class BrickWarfare {
         ...this.outposts
           .filter((outpost) => outpost.owner === faction)
           .map((outpost) => outpost.root.position),
-        ...STAGING_SPAWN_LAYOUTS[faction].map(({ x, z }) => new Vector3(x, 0, z)),
+        ...stagingLayouts[faction].map(({ x, z }) => new Vector3(x, 0, z)),
       ];
       const zoneKindCounts = new Map<string, number>();
-      INITIAL_FORCE.forEach((kind, index) => {
+      this.modeConfig.initialForce.forEach((kind, index) => {
         const zoneIndex = kind === 'fighter' ? 0 : index % spawnAnchors.length;
         const anchor = spawnAnchors[zoneIndex];
         const countKey = `${zoneIndex}:${kind}`;
@@ -301,26 +370,50 @@ export class BrickWarfare {
       });
     }
 
-    for (const building of this.battlefieldTheme.buildings) {
-      const position = new Vector3(building.x, terrainHeight(building.x, building.z), building.z);
-      const structure = new BrickStructure(position, building, building.color, true);
-      structure.root.rotation.y = (building.x * 0.13 + building.z * 0.07) % Math.PI;
-      this.structures.push(structure);
-      this.scene.add(structure.root);
-    }
-    for (const wall of this.battlefieldTheme.walls) {
-      const position = new Vector3(wall.x, terrainHeight(wall.x, wall.z), wall.z);
-      const structure = new BrickStructure(
-        position,
-        { width: wall.length, height: wall.height, depth: 1 },
-        wall.color,
-        false,
-      );
-      structure.root.rotation.y = wall.yaw;
+    const structurePlans = this.playMode === 'challenge'
+      ? CHALLENGE_STRUCTURES
+      : this.createSandboxStructurePlans();
+    for (const plan of structurePlans) {
+      const structure = createStructureFromPlan(plan);
       this.structures.push(structure);
       this.scene.add(structure.root);
     }
     this.world.setTerritories(this.outposts);
+    if (this.playMode === 'challenge') {
+      this.adaptiveDirector = new AdaptiveDirector(this.outposts);
+    }
+  }
+
+  private createSandboxStructurePlans(): StructurePlan[] {
+    const buildings: StructurePlan[] = this.battlefieldTheme.buildings.map(
+      (building, index) => ({
+        id: `sandbox-building-${index + 1}`,
+        kind: 'building',
+        x: building.x,
+        z: building.z,
+        width: building.width,
+        height: building.height,
+        depth: building.depth,
+        yaw: (building.x * 0.13 + building.z * 0.07) % Math.PI,
+        color: building.color,
+        openCenter: true,
+      }),
+    );
+    const walls: StructurePlan[] = this.battlefieldTheme.walls.map(
+      (wall, index) => ({
+        id: `sandbox-wall-${index + 1}`,
+        kind: 'wall',
+        x: wall.x,
+        z: wall.z,
+        width: wall.length,
+        height: wall.height,
+        depth: 1,
+        yaw: wall.yaw,
+        color: wall.color,
+        openCenter: false,
+      }),
+    );
+    return [...buildings, ...walls];
   }
 
   private spawnUnit(kind: UnitKind, faction: FactionId, requestedPosition: Vector3): Unit {
@@ -368,7 +461,8 @@ export class BrickWarfare {
     }
 
     this.aiAccumulator += delta;
-    if (this.aiAccumulator >= 1 / 30) {
+    const aiInterval = this.playMode === 'challenge' ? 1 / 20 : 1 / 30;
+    if (this.aiAccumulator >= aiInterval) {
       const aiDelta = Math.min(this.aiAccumulator, 0.1);
       this.aiAccumulator = 0;
       this.ai.update(
@@ -414,10 +508,12 @@ export class BrickWarfare {
       this.outpostAccumulator = 0;
     }
     this.updateEconomy(delta);
-    this.diplomacyAccumulator += delta;
-    if (this.diplomacyAccumulator >= 0.5) {
-      this.updateDiplomacy(this.diplomacyAccumulator);
-      this.diplomacyAccumulator = 0;
+    if (this.modeConfig.enableDiplomacy) {
+      this.diplomacyAccumulator += delta;
+      if (this.diplomacyAccumulator >= 0.5) {
+        this.updateDiplomacy(this.diplomacyAccumulator);
+        this.diplomacyAccumulator = 0;
+      }
     }
     this.headquartersAccumulator += delta;
     if (this.headquartersAccumulator >= 0.5) {
@@ -429,11 +525,62 @@ export class BrickWarfare {
       this.unitCleanupTimer = 2;
       this.cleanupDestroyedUnits();
     }
+    this.updateChallenge(delta);
 
     if (this.possessedUnit?.destroyed && !this.killCamera) {
-      this.hud.notify('빙의 연결 종료', `${this.possessedUnit.displayName}이 파괴되었습니다.`, '#ff6b63');
+      this.hud.notify(
+        '빙의 연결 종료',
+        `${this.possessedUnit.displayName}이 파괴되었습니다.`,
+        '#ff6b63',
+      );
       this.exitPossession();
     }
+  }
+
+  private updateChallenge(delta: number): void {
+    if (!this.challengeSession || !this.adaptiveDirector) {
+      return;
+    }
+    const prediction = this.adaptiveDirector.update(delta, this.outposts);
+    this.adaptiveSyncTimer -= delta;
+    if (
+      this.adaptiveSyncTimer <= 0
+      && prediction.targetId
+      && prediction.confidence >= 0.24
+    ) {
+      this.adaptiveSyncTimer = 4;
+      this.ai.setPriorityObjective('crimson', prediction.targetId, 5.5);
+    }
+
+    const snapshot = this.challengeSession.update(
+      delta,
+      this.getChallengeOutpostCounts(),
+    );
+    if (
+      this.mode === 'possession'
+      && this.possessedUnit
+      && snapshot.possessionSeconds <= 0
+    ) {
+      this.hud.notify(
+        '빙의 시간 종료',
+        '지휘 링크가 재충전을 시작합니다.',
+        '#ffcf5d',
+      );
+      this.exitPossession();
+    }
+    if (snapshot.finished && !this.challengeResultShown) {
+      this.challengeResultShown = true;
+      this.simulationRunning = false;
+      this.input.unlockPointer();
+      this.hud.showResult(snapshot);
+    }
+  }
+
+  private getChallengeOutpostCounts(): { azure: number; crimson: number } {
+    return {
+      azure: this.outposts.filter((outpost) => outpost.owner === 'azure').length,
+      crimson: this.outposts.filter((outpost) => outpost.owner === 'crimson').length,
+    };
   }
 
   private updateGodControls(delta: number): void {
@@ -630,6 +777,7 @@ export class BrickWarfare {
       const capturedBy = outpost.update(delta, this.units);
       if (capturedBy) {
         this.world.setTerritories(this.outposts);
+        this.challengeSession?.recordCapture(capturedBy);
         this.hud.notify(
           '거점 점령 완료',
           `${FACTIONS[capturedBy].name}이 ${outpost.id.toUpperCase()}의 보급망을 확보했습니다.`,
@@ -644,18 +792,28 @@ export class BrickWarfare {
     this.aiSpawnTimer -= delta;
     if (this.resourceTimer <= 0) {
       this.resourceTimer = WORLD.resourceTick;
-      for (const faction of FACTION_ORDER) {
+      for (const faction of this.activeFactions) {
         if (this.eliminatedFactions.has(faction)) {
           continue;
         }
-        const outpostIncome = this.outposts.filter((outpost) => outpost.owner === faction).length * 14;
+        const outpostCount = this.outposts.filter(
+          (outpost) => outpost.owner === faction,
+        ).length;
+        const outpostIncome = outpostCount * (this.playMode === 'challenge' ? 4 : 14);
+        const baseIncome = this.playMode === 'challenge' ? 5 : 18;
         const doctrineBonus = FACTIONS[faction].doctrine === 'entrenchment' ? 4 : 0;
-        this.resources.set(faction, (this.resources.get(faction) ?? 0) + 18 + outpostIncome + doctrineBonus);
+        this.resources.set(
+          faction,
+          (this.resources.get(faction) ?? 0)
+            + baseIncome
+            + outpostIncome
+            + doctrineBonus,
+        );
       }
     }
     if (this.aiSpawnTimer <= 0) {
       this.aiSpawnTimer = 5;
-      for (const faction of FACTION_ORDER) {
+      for (const faction of this.activeFactions) {
         this.spawnAiReinforcement(faction);
       }
     }
@@ -665,7 +823,7 @@ export class BrickWarfare {
     const alive = this.units.filter((unit) => unit.faction === faction && !unit.destroyed).length;
     if (
       alive === 0
-      || alive >= TARGET_UNITS_PER_FACTION
+      || alive >= this.modeConfig.targetUnitsPerFaction
       || this.eliminatedFactions.has(faction)
     ) {
       return;
@@ -676,21 +834,31 @@ export class BrickWarfare {
       return;
     }
     const strategy = this.ai.getStrategy(faction);
-    const missing = TARGET_UNITS_PER_FACTION - alive;
+    const missing = this.modeConfig.targetUnitsPerFaction - alive;
     const spawnCount = Math.min(missing, ownedOutposts.length);
+    let spawnedCount = 0;
     for (let index = 0; index < spawnCount; index += 1) {
       const kind = chooseReinforcementKind(strategy);
+      const reinforcementCost = this.modeConfig.deploymentCosts[kind] ?? 0;
+      const balance = this.resources.get(faction) ?? 0;
+      if (!this.modeConfig.unlimitedDeployment && balance < reinforcementCost) {
+        break;
+      }
       const nextSequence = sequence + index;
       const spawnAnchor = ownedOutposts[nextSequence % ownedOutposts.length].root.position;
       const spawn = reinforcementSpawnPosition(spawnAnchor, nextSequence);
       this.spawnUnit(kind, faction, spawn);
+      spawnedCount += 1;
+      if (!this.modeConfig.unlimitedDeployment) {
+        this.resources.set(faction, balance - reinforcementCost);
+      }
     }
-    this.reinforcementSequence.set(faction, sequence + spawnCount);
+    this.reinforcementSequence.set(faction, sequence + spawnedCount);
   }
 
   private checkFactionEliminations(): void {
     let territoryChanged = false;
-    for (const faction of FACTION_ORDER) {
+    for (const faction of this.activeFactions) {
       if (
         this.eliminatedFactions.has(faction)
         || this.units.some((unit) => unit.faction === faction && !unit.destroyed)
@@ -710,11 +878,15 @@ export class BrickWarfare {
         `${FACTIONS[faction].name}의 생존 병력이 모두 전멸했습니다.`,
         '#ff4f47',
       );
+      if (this.challengeSession) {
+        const winner = faction === 'azure' ? 'crimson' : 'azure';
+        this.challengeSession.finish(winner, 'elimination');
+      }
     }
     if (territoryChanged) {
       this.world.setTerritories(this.outposts);
     }
-    const survivors = FACTION_ORDER.filter(
+    const survivors = this.activeFactions.filter(
       (faction) => !this.eliminatedFactions.has(faction),
     );
     if (survivors.length === 1 && this.victoryFaction === null) {
@@ -797,6 +969,10 @@ export class BrickWarfare {
         `${FACTIONS[faction].name}의 본부가 파괴됐지만 생존 병력과 점령 거점은 계속 작전합니다.`,
         '#ff5f57',
       );
+      if (this.challengeSession) {
+        const winner = faction === 'azure' ? 'crimson' : 'azure';
+        this.challengeSession.finish(winner, 'headquarters');
+      }
     }
   }
 
@@ -840,6 +1016,12 @@ export class BrickWarfare {
       },
       neutralOutposts,
     });
+    if (this.challengeSession && this.adaptiveDirector) {
+      this.hud.setChallengeState({
+        session: this.challengeSession.snapshot(),
+        prediction: this.adaptiveDirector.getPrediction(),
+      });
+    }
     this.hud.setSelection(this.possessedUnit ?? this.selectedUnit);
   }
 
@@ -979,6 +1161,17 @@ export class BrickWarfare {
     if (!this.selectedUnit || this.selectedUnit.destroyed) {
       return;
     }
+    if (
+      this.playMode === 'challenge'
+      && this.selectedUnit.faction !== this.activeFaction
+    ) {
+      this.hud.notify(
+        '명령 권한 없음',
+        'Challenge에서는 청람 연합 유닛만 지휘할 수 있습니다.',
+        '#ff746b',
+      );
+      return;
+    }
     const targetUnit = this.pickUnit(event);
     const point = targetUnit?.position.clone() ?? this.pickGround(event);
     if (!point) {
@@ -989,11 +1182,40 @@ export class BrickWarfare {
       destination: point,
       targetId: targetUnit?.id,
     };
+    const commandedOutpost = this.findClosestOutpost(point, 42);
+    if (this.adaptiveDirector) {
+      const observation = this.adaptiveDirector.observeCommand(
+        this.selectedUnit.kind,
+        commandedOutpost,
+        this.outposts,
+      );
+      if (observation.deceptionTriggered) {
+        this.challengeSession?.recordDeception();
+        this.hud.notify(
+          'AI 예측 기만 성공',
+          '적 예비대가 잘못된 거점으로 이동했습니다. +120점',
+          '#70e1a1',
+        );
+      }
+    }
     this.hud.notify(
       '전술 명령 전송',
       `${this.selectedUnit.displayName}: ${targetUnit ? '표적 교전' : '지정 위치로 이동'}`,
       FACTIONS[this.selectedUnit.faction].accent,
     );
+  }
+
+  private findClosestOutpost(point: Vector3, maximumDistance: number): Outpost | null {
+    let closest: Outpost | null = null;
+    let closestDistance = maximumDistance * maximumDistance;
+    for (const outpost of this.outposts) {
+      const distance = outpost.root.position.distanceToSquared(point);
+      if (distance < closestDistance) {
+        closest = outpost;
+        closestDistance = distance;
+      }
+    }
+    return closest;
   }
 
   private pickUnit(event: MouseEvent): Unit | null {
@@ -1040,6 +1262,23 @@ export class BrickWarfare {
   }
 
   private enterPossession(unit: Unit): void {
+    if (this.playMode === 'challenge' && unit.faction !== this.activeFaction) {
+      this.hud.notify(
+        '빙의 권한 없음',
+        '적월 유닛의 전술 링크에는 접속할 수 없습니다.',
+        '#ff746b',
+      );
+      return;
+    }
+    if (this.challengeSession && !this.challengeSession.beginPossession()) {
+      const link = this.challengeSession.snapshot().linkPercent;
+      this.hud.notify(
+        '지휘 링크 재충전 중',
+        `빙의 링크 ${Math.floor(link)}% · 100%에서 다시 접속할 수 있습니다.`,
+        '#ffcf5d',
+      );
+      return;
+    }
     this.selectUnit(unit);
     this.possessedUnit?.setPossessed(false);
     this.possessedUnit = unit;
@@ -1068,12 +1307,21 @@ export class BrickWarfare {
     this.godPitch = -0.32;
     this.possessedUnit.setPossessed(false);
     this.possessedUnit = null;
+    this.challengeSession?.endPossession();
     this.mode = 'god';
     this.hud.setMode(this.mode);
     this.input.unlockPointer();
   }
 
   private toggleDeploy(kind: DeployKind): void {
+    if (!this.modeConfig.allowedDeployments.includes(kind)) {
+      this.hud.notify(
+        'Challenge 제한',
+        '지형 편집 도구는 Sandbox에서만 사용할 수 있습니다.',
+        '#ffcf5d',
+      );
+      return;
+    }
     this.deployKind = this.deployKind === kind ? null : kind;
     this.hud.setDeploy(this.deployKind);
   }
@@ -1081,6 +1329,38 @@ export class BrickWarfare {
   private deployAt(point: Vector3): void {
     const kind = this.deployKind;
     if (!kind) {
+      return;
+    }
+    if (
+      this.playMode === 'challenge'
+      && this.eliminatedFactions.has(this.activeFaction)
+    ) {
+      this.hud.notify(
+        '작전 종료',
+        '전멸한 진영은 다시 배치할 수 없습니다.',
+        '#ff746b',
+      );
+      return;
+    }
+    if (
+      this.playMode === 'challenge'
+      && (kind === 'infantry'
+        || kind === 'tank'
+        || kind === 'fighter'
+        || kind === 'helicopter'
+        || kind === 'drone')
+      && this.units.filter(
+        (unit) => unit.faction === this.activeFaction && !unit.destroyed,
+      ).length >= this.modeConfig.targetUnitsPerFaction + 4
+    ) {
+      this.hud.notify(
+        '지휘 한도 도달',
+        '동시 운용 병력은 최대 16개입니다.',
+        '#ffcf5d',
+      );
+      return;
+    }
+    if (!this.spendDeploymentCost(kind)) {
       return;
     }
     if (kind === 'mountain' || kind === 'trench') {
@@ -1099,26 +1379,21 @@ export class BrickWarfare {
       return;
     }
     if (kind === 'building') {
-      const width = 6 + Math.floor(Math.random() * 5);
-      const height = 15 + Math.floor(Math.random() * 14);
-      const depth = 5 + Math.floor(Math.random() * 5);
-      const palette = [0x6f7778, 0x827668, 0x6d7367, 0x817069];
-      const structure = new BrickStructure(
-        new Vector3(point.x, terrainHeight(point.x, point.z), point.z),
-        { width, height, depth },
-        palette[Math.floor(Math.random() * palette.length)],
-        true,
-        this.activeFaction,
+      const structure = createStructureFromPlan(
+        createPlayerBuildingPlan(
+          point,
+          this.godAzimuth,
+          this.activeFaction,
+        ),
       );
-      structure.root.rotation.y = this.godAzimuth + (Math.random() - 0.5) * 0.3;
       this.structures.push(structure);
       this.scene.add(structure.root);
       return;
     }
     if (kind === 'wall') {
       const structure = new BrickStructure(
-        point,
-        { width: 20, height: 6, depth: 1 },
+        new Vector3(point.x, terrainHeight(point.x, point.z), point.z),
+        { width: 32, height: 7, depth: 1 },
         FACTIONS[this.activeFaction].color,
         false,
         this.activeFaction,
@@ -1141,7 +1416,31 @@ export class BrickWarfare {
     }
   }
 
+  private spendDeploymentCost(kind: DeployKind): boolean {
+    if (this.modeConfig.unlimitedDeployment) {
+      return true;
+    }
+    const cost = this.modeConfig.deploymentCosts[kind];
+    if (cost === undefined) {
+      return false;
+    }
+    const balance = this.resources.get(this.activeFaction) ?? 0;
+    if (balance < cost) {
+      this.hud.notify(
+        '보급 부족',
+        `${cost} SUP가 필요합니다. 현재 보급: ${Math.floor(balance)}`,
+        '#ff746b',
+      );
+      return false;
+    }
+    this.resources.set(this.activeFaction, balance - cost);
+    return true;
+  }
+
   private cycleFaction(): void {
+    if (!this.modeConfig.enableFactionCycle) {
+      return;
+    }
     const index = FACTION_ORDER.indexOf(this.activeFaction);
     this.activeFaction = FACTION_ORDER[(index + 1) % FACTION_ORDER.length];
     this.hud.setFaction(this.activeFaction);
@@ -1149,6 +1448,9 @@ export class BrickWarfare {
   }
 
   private interveneDiplomacy(target: FactionId): void {
+    if (!this.modeConfig.enableDiplomacy) {
+      return;
+    }
     const cost = 150;
     const balance = this.resources.get(this.activeFaction) ?? 0;
     if (balance < cost) {
@@ -1197,12 +1499,15 @@ export class BrickWarfare {
       event.victim.position.clone(),
       event.victim.collisionRadius * 2.2 + 3,
     );
+    if (event.attackerFaction !== event.victim.faction) {
+      this.challengeSession?.recordKill(event.attackerFaction);
+    }
 
     const playerDeath = event.victim === this.possessedUnit;
     const playerKill = event.playerControlled && !playerDeath;
     const victimName = `${FACTIONS[event.victim.faction].name} ${event.victim.displayName}`;
 
-    if (playerDeath || playerKill) {
+    if (this.modeConfig.enableKillCamera && (playerDeath || playerKill)) {
       this.startKillCamera(event.victim, playerDeath);
     } else if (Math.random() < 0.4 || event.victim.kind === 'tank' || event.victim.isAircraft) {
       this.hud.notify(

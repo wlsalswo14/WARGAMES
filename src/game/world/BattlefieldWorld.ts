@@ -93,6 +93,7 @@ export class BattlefieldWorld {
     palette: TerrainPalette,
     private readonly treeDensity: number,
     terrainProfile: TerrainProfile,
+    private readonly chunkRadius: number = WORLD.chunkRadius,
   ) {
     configureTerrainProfile(terrainProfile);
     this.lowColor = new Color(palette.low);
@@ -267,8 +268,8 @@ export class BattlefieldWorld {
     this.lastCenterZ = centerZ;
 
     const required = new Set<string>();
-    for (let offsetX = -WORLD.chunkRadius; offsetX <= WORLD.chunkRadius; offsetX += 1) {
-      for (let offsetZ = -WORLD.chunkRadius; offsetZ <= WORLD.chunkRadius; offsetZ += 1) {
+    for (let offsetX = -this.chunkRadius; offsetX <= this.chunkRadius; offsetX += 1) {
+      for (let offsetZ = -this.chunkRadius; offsetZ <= this.chunkRadius; offsetZ += 1) {
         const x = centerX + offsetX;
         const z = centerZ + offsetZ;
         const key = `${x}:${z}`;

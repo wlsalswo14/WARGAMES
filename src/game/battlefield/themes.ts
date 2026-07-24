@@ -231,16 +231,16 @@ function createBuildings(
   terrainProfile: TerrainProfile,
 ): TownBuildingLayout[] {
   const targetCount = id === 'urban'
-    ? 20
+    ? 14
     : id === 'trenches'
-      ? 12
+      ? 9
       : id === 'riverlands'
-        ? 14
+        ? 10
         : id === 'forest'
-          ? 8
+          ? 6
           : id === 'canyon'
-            ? 7
-            : 9;
+            ? 6
+            : 7;
   const buildings: TownBuildingLayout[] = [];
   let attempts = 0;
   while (buildings.length < targetCount && attempts < targetCount * 32) {
@@ -248,7 +248,7 @@ function createBuildings(
     const x = randomRange(random, -265, 265);
     const z = randomRange(random, -215, 215);
     if (
-      buildings.some((building) => Math.hypot(building.x - x, building.z - z) < 25)
+      buildings.some((building) => Math.hypot(building.x - x, building.z - z) < 36)
       || isReservedArea(x, z, 52, 92)
       || Math.abs(z - themeRiverCenterZ(x, terrainProfile)) < 20
     ) {
@@ -257,11 +257,11 @@ function createBuildings(
     buildings.push({
       x,
       z,
-      width: 5 + Math.floor(random() * 5),
+      width: 10 + Math.floor(random() * 7),
       height: id === 'urban'
-        ? 16 + Math.floor(random() * 16)
-        : 11 + Math.floor(random() * 12),
-      depth: 5 + Math.floor(random() * 4),
+        ? 28 + Math.floor(random() * 20)
+        : 22 + Math.floor(random() * 16),
+      depth: 8 + Math.floor(random() * 7),
       color: [0x6f7778, 0x827668, 0x6d7367, 0x817069][Math.floor(random() * 4)],
     });
   }
@@ -302,8 +302,8 @@ function createWalls(
     walls.push({
       x,
       z,
-      length: 15 + Math.floor(random() * 10),
-      height: 4 + Math.floor(random() * 4),
+      length: 26 + Math.floor(random() * 16),
+      height: 5 + Math.floor(random() * 4),
       yaw: randomRange(random, 0, Math.PI),
       color: [0x666c6d, 0x756c5e, 0x555f61, 0x746b62][Math.floor(random() * 4)],
     });
