@@ -4,10 +4,12 @@
 
 > **현재 상태:** 브라우저 플레이가 가능한 기술 데모  
 > **플레이 링크:** `https://wlsalswo14.github.io/WARGAMES/`
+> **1:1:1 바로 시작:** `https://wlsalswo14.github.io/WARGAMES/?mode=challenge&factions=3`
+> **Sandbox:** `https://wlsalswo14.github.io/WARGAMES/?mode=sandbox`
 
 ## 핵심 기능
 
-- **AI Challenge:** 기본 모드는 7분짜리 2개 진영 점수전입니다. 거점 점수로 앞서거나 적 지휘 본부를 파괴하면 승리합니다.
+- **AI Challenge:** 7분짜리 `1:1` 또는 `1:1:1` 점수전을 선택합니다. 진영별 시작 거점 3개와 중앙 중립 거점 3개를 두고 경쟁합니다.
 - **Adaptive Commander:** 플레이어가 반복해서 명령하는 거점을 확률적으로 예측하고 적월 예비대를 해당 전선에 집중합니다.
 - **Deception Bonus:** 높은 확률로 예측된 목표와 다른 거점으로 공세를 전환하면 AI 기만 보너스와 추가 점수를 얻습니다.
 - **Limited Command Economy:** 병력·장벽·대형 건물 배치에 SUP가 필요하며, 동시 운용 병력과 발사체 수를 제한합니다.

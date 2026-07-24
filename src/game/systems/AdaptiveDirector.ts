@@ -18,11 +18,10 @@ export interface AdaptiveObservation {
   deceptionTriggered: boolean;
 }
 
-const STORAGE_KEY = 'brick-warfare-adaptive-profile-v1';
-
 export class AdaptiveDirector {
   private readonly targetWeights = new Map<string, number>();
   private readonly unitWeights = new Map<UnitKind, number>();
+  private readonly storageKey: string;
   private prediction: AdaptivePrediction = {
     targetId: null,
     targetLabel: '데이터 수집 중',
@@ -33,6 +32,7 @@ export class AdaptiveDirector {
   private commandCount = 0;
 
   constructor(outposts: Outpost[]) {
+    this.storageKey = `brick-warfare-adaptive-profile-v1-${outposts.length}`;
     const saved = this.loadProfile();
     outposts.forEach((outpost, index) => {
       this.targetWeights.set(
@@ -118,7 +118,7 @@ export class AdaptiveDirector {
 
   private loadProfile(): LearnedProfile {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(this.storageKey);
       if (!raw) {
         return { targetWeights: {}, unitWeights: {} };
       }
@@ -137,7 +137,7 @@ export class AdaptiveDirector {
       const targetWeights = Object.fromEntries(this.targetWeights);
       const unitWeights = Object.fromEntries(this.unitWeights);
       window.localStorage.setItem(
-        STORAGE_KEY,
+        this.storageKey,
         JSON.stringify({ targetWeights, unitWeights }),
       );
     } catch {

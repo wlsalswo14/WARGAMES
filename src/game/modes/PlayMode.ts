@@ -1,6 +1,7 @@
 import type { DeployKind, FactionId, UnitKind } from '../types';
 
 export type PlayMode = 'challenge' | 'sandbox';
+export type ChallengeFormat = 'duel' | 'triple';
 
 export interface PlayModeConfig {
   id: PlayMode;
@@ -62,12 +63,12 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
     activeFactions: ['azure', 'crimson'],
     initialForce: CHALLENGE_FORCE,
     targetUnitsPerFaction: CHALLENGE_FORCE.length,
-    chunkRadius: 2,
+    chunkRadius: 3,
     matchDuration: 7 * 60,
     startingResources: {
       azure: 320,
       crimson: 260,
-      amber: 0,
+      amber: 260,
     },
     deploymentCosts: {
       infantry: 45,
@@ -131,4 +132,19 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
 export function getRequestedPlayMode(search = window.location.search): PlayMode {
   const requested = new URLSearchParams(search).get('mode');
   return requested === 'sandbox' ? 'sandbox' : 'challenge';
+}
+
+export function getRequestedChallengeFormat(
+  search = window.location.search,
+): ChallengeFormat {
+  const requested = new URLSearchParams(search).get('factions');
+  return requested === '3' ? 'triple' : 'duel';
+}
+
+export function getChallengeFactions(
+  format: ChallengeFormat,
+): readonly FactionId[] {
+  return format === 'triple'
+    ? ['azure', 'crimson', 'amber']
+    : ['azure', 'crimson'];
 }

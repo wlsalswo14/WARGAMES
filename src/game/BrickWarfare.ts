@@ -18,11 +18,9 @@ import {
 } from 'three';
 import { chooseReinforcementKind } from './battlefield/forces';
 import {
-  CHALLENGE_BASES,
-  CHALLENGE_OUTPOSTS,
-  CHALLENGE_STAGING,
   CHALLENGE_STRUCTURES,
   CHALLENGE_THEME,
+  getChallengeLayout,
 } from './battlefield/challengeLayout';
 import {
   BASE_LAYOUTS,
@@ -54,8 +52,11 @@ import {
   terrainHeight,
 } from './math';
 import {
+  getChallengeFactions,
+  getRequestedChallengeFormat,
   getRequestedPlayMode,
   PLAY_MODE_CONFIGS,
+  type ChallengeFormat,
   type PlayMode,
 } from './modes/PlayMode';
 import { AdaptiveDirector } from './systems/AdaptiveDirector';
@@ -99,8 +100,12 @@ export class BrickWarfare {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly playMode = getRequestedPlayMode();
+  private readonly challengeFormat = getRequestedChallengeFormat();
   private readonly modeConfig = PLAY_MODE_CONFIGS[this.playMode];
-  private readonly activeFactions = this.modeConfig.activeFactions;
+  private readonly activeFactions = this.playMode === 'challenge'
+    ? getChallengeFactions(this.challengeFormat)
+    : this.modeConfig.activeFactions;
+  private readonly challengeLayout = getChallengeLayout(this.challengeFormat);
   private readonly battlefieldTheme = this.playMode === 'challenge'
     ? CHALLENGE_THEME
     : createRandomBattlefieldTheme();
@@ -133,6 +138,7 @@ export class BrickWarfare {
         duration: this.modeConfig.matchDuration ?? 420,
         possessionDuration: this.modeConfig.possessionDuration ?? 15,
         possessionRecharge: this.modeConfig.possessionRecharge,
+        activeFactions: this.activeFactions,
       })
     : null;
   private adaptiveDirector: AdaptiveDirector | null = null;
@@ -192,53 +198,62 @@ export class BrickWarfare {
     this.scene.fog = new Fog(0x91afbd, 210, 760);
     this.scene.add(this.world.root);
     this.setupLighting();
+    if (this.playMode === 'challenge' && this.challengeFormat === 'triple') {
+      this.diplomacy.set('azure', 'amber', 'hostile');
+    }
 
-    this.hud = new Hud(this.shell, this.playMode, {
-      onStart: () => {
-        this.simulationRunning = true;
-        this.challengeSession?.start();
-        this.clock.getDelta();
-        this.input.lockPointer();
-        this.hud.notify(
-          `전장 전개 · ${this.battlefieldTheme.label}`,
-          this.battlefieldTheme.description,
-          '#8ed8ff',
-        );
-        if (this.playMode === 'challenge') {
+    this.hud = new Hud(
+      this.shell,
+      this.playMode,
+      this.challengeFormat,
+      {
+        onStart: () => {
+          this.simulationRunning = true;
+          this.challengeSession?.start();
+          this.clock.getDelta();
+          this.input.lockPointer();
           this.hud.notify(
-            '작전 목표',
-            '7분 동안 거점 점수에서 앞서거나 적 지휘 본부를 파괴하십시오.',
-            '#ffcf5d',
+            `전장 전개 · ${this.battlefieldTheme.label}`,
+            this.battlefieldTheme.description,
+            '#8ed8ff',
           );
-          this.hud.notify(
-            '적응형 지휘 AI',
-            '우클릭 명령 패턴을 예측합니다. 표적을 바꿔 예측을 속이면 추가 점수를 얻습니다.',
-            '#ff7b63',
-          );
-        } else {
-          this.hud.notify(
-            'Sandbox 연결',
-            '모든 진영과 지형 도구를 무제한으로 사용할 수 있습니다.',
-          );
-        }
-        if (this.softwareRendering) {
-          this.hud.notify(
-            '소프트웨어 렌더링 감지',
-            '브라우저 하드웨어 가속을 켠 뒤 다시 실행하면 CPU 사용량과 프레임이 개선됩니다.',
-            '#ff7b63',
-          );
-        }
+          if (this.playMode === 'challenge') {
+            this.hud.notify(
+              '작전 목표',
+              '7분 동안 거점 점수에서 앞서거나 적 지휘 본부를 파괴하십시오.',
+              '#ffcf5d',
+            );
+            this.hud.notify(
+              '적응형 지휘 AI',
+              '우클릭 명령 패턴을 예측합니다. 표적을 바꿔 예측을 속이면 추가 점수를 얻습니다.',
+              '#ff7b63',
+            );
+          } else {
+            this.hud.notify(
+              'Sandbox 연결',
+              '모든 진영과 지형 도구를 무제한으로 사용할 수 있습니다.',
+            );
+          }
+          if (this.softwareRendering) {
+            this.hud.notify(
+              '소프트웨어 렌더링 감지',
+              '브라우저 하드웨어 가속을 켠 뒤 다시 실행하면 CPU 사용량과 프레임이 개선됩니다.',
+              '#ff7b63',
+            );
+          }
+        },
+        onModeSelect: (mode) => this.selectPlayMode(mode),
+        onFormatSelect: (format) => this.selectChallengeFormat(format),
+        onDeploy: (kind) => this.toggleDeploy(kind),
+        onCycleFaction: () => this.cycleFaction(),
+        onDiplomacy: (target) => this.interveneDiplomacy(target),
+        onPossess: () => {
+          if (this.selectedUnit && !this.selectedUnit.destroyed) {
+            this.enterPossession(this.selectedUnit);
+          }
+        },
       },
-      onModeSelect: (mode) => this.selectPlayMode(mode),
-      onDeploy: (kind) => this.toggleDeploy(kind),
-      onCycleFaction: () => this.cycleFaction(),
-      onDiplomacy: (target) => this.interveneDiplomacy(target),
-      onPossess: () => {
-        if (this.selectedUnit && !this.selectedUnit.destroyed) {
-          this.enterPossession(this.selectedUnit);
-        }
-      },
-    });
+    );
 
     this.combat = new CombatSystem(
       this.scene,
@@ -281,6 +296,13 @@ export class BrickWarfare {
     window.location.assign(url);
   }
 
+  private selectChallengeFormat(format: ChallengeFormat): void {
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'challenge');
+    url.searchParams.set('factions', format === 'triple' ? '3' : '2');
+    window.location.assign(url);
+  }
+
   private setupLighting(): void {
     const hemisphere = new HemisphereLight(0xc9e7f2, 0x30352b, 1.65);
     this.scene.add(hemisphere);
@@ -306,13 +328,13 @@ export class BrickWarfare {
     }
 
     const outpostLayouts = this.playMode === 'challenge'
-      ? CHALLENGE_OUTPOSTS
+      ? this.challengeLayout.outposts
       : OUTPOST_LAYOUTS;
     const baseLayouts = this.playMode === 'challenge'
-      ? CHALLENGE_BASES
+      ? this.challengeLayout.bases
       : BASE_LAYOUTS;
     const stagingLayouts = this.playMode === 'challenge'
-      ? CHALLENGE_STAGING
+      ? this.challengeLayout.staging
       : STAGING_SPAWN_LAYOUTS;
 
     for (const layout of outpostLayouts) {
@@ -549,7 +571,11 @@ export class BrickWarfare {
       && prediction.confidence >= 0.24
     ) {
       this.adaptiveSyncTimer = 4;
-      this.ai.setPriorityObjective('crimson', prediction.targetId, 5.5);
+      for (const faction of this.activeFactions) {
+        if (faction !== this.activeFaction) {
+          this.ai.setPriorityObjective(faction, prediction.targetId, 5.5);
+        }
+      }
     }
 
     const snapshot = this.challengeSession.update(
@@ -576,11 +602,18 @@ export class BrickWarfare {
     }
   }
 
-  private getChallengeOutpostCounts(): { azure: number; crimson: number } {
-    return {
-      azure: this.outposts.filter((outpost) => outpost.owner === 'azure').length,
-      crimson: this.outposts.filter((outpost) => outpost.owner === 'crimson').length,
+  private getChallengeOutpostCounts(): Record<FactionId, number> {
+    const counts: Record<FactionId, number> = {
+      azure: 0,
+      crimson: 0,
+      amber: 0,
     };
+    for (const outpost of this.outposts) {
+      if (outpost.owner) {
+        counts[outpost.owner] += 1;
+      }
+    }
+    return counts;
   }
 
   private updateGodControls(delta: number): void {
@@ -878,9 +911,15 @@ export class BrickWarfare {
         `${FACTIONS[faction].name}의 생존 병력이 모두 전멸했습니다.`,
         '#ff4f47',
       );
-      if (this.challengeSession) {
-        const winner = faction === 'azure' ? 'crimson' : 'azure';
-        this.challengeSession.finish(winner, 'elimination');
+      if (this.challengeSession && faction === this.activeFaction) {
+        const opponents = this.activeFactions.filter(
+          (candidate) => candidate !== this.activeFaction
+            && !this.eliminatedFactions.has(candidate),
+        );
+        this.challengeSession.finish(
+          this.findLeadingFaction(opponents),
+          'elimination',
+        );
       }
     }
     if (territoryChanged) {
@@ -891,6 +930,7 @@ export class BrickWarfare {
     );
     if (survivors.length === 1 && this.victoryFaction === null) {
       this.victoryFaction = survivors[0];
+      this.challengeSession?.finish(this.victoryFaction, 'elimination');
       this.hud.notify(
         '전쟁 승리',
         `${FACTIONS[this.victoryFaction].name}이 최후의 생존 국가가 되었습니다.`,
@@ -970,10 +1010,34 @@ export class BrickWarfare {
         '#ff5f57',
       );
       if (this.challengeSession) {
-        const winner = faction === 'azure' ? 'crimson' : 'azure';
-        this.challengeSession.finish(winner, 'headquarters');
+        const opponents = this.activeFactions.filter(
+          (candidate) => candidate !== this.activeFaction,
+        );
+        if (faction === this.activeFaction) {
+          this.challengeSession.finish(
+            this.findLeadingFaction(opponents),
+            'headquarters',
+          );
+        } else if (
+          opponents.every(
+            (opponent) => this.destroyedHeadquarters.has(opponent)
+              || this.eliminatedFactions.has(opponent),
+          )
+        ) {
+          this.challengeSession.finish(this.activeFaction, 'headquarters');
+        }
       }
     }
+  }
+
+  private findLeadingFaction(candidates: readonly FactionId[]): FactionId | null {
+    const scores = this.challengeSession?.snapshot().scores;
+    if (!scores || candidates.length === 0) {
+      return null;
+    }
+    return [...candidates].sort(
+      (left, right) => scores[right] - scores[left],
+    )[0] ?? null;
   }
 
   private updateHud(delta: number): void {

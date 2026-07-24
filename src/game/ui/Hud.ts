@@ -1,5 +1,9 @@
 import { FACTIONS } from '../config';
-import type { PlayMode, PlayModeConfig } from '../modes/PlayMode';
+import type {
+  ChallengeFormat,
+  PlayMode,
+  PlayModeConfig,
+} from '../modes/PlayMode';
 import type { AdaptivePrediction } from '../systems/AdaptiveDirector';
 import type { ChallengeSessionSnapshot } from '../systems/ChallengeSession';
 import type {
@@ -14,6 +18,7 @@ import type { Unit } from '../entities/Unit';
 interface HudCallbacks {
   onStart: () => void;
   onModeSelect: (mode: PlayMode) => void;
+  onFormatSelect: (format: ChallengeFormat) => void;
   onDeploy: (kind: DeployKind) => void;
   onCycleFaction: () => void;
   onDiplomacy: (target: FactionId) => void;
@@ -78,6 +83,7 @@ export class Hud {
   constructor(
     container: HTMLElement,
     private readonly playMode: PlayMode,
+    private readonly challengeFormat: ChallengeFormat,
     private readonly callbacks: HudCallbacks,
   ) {
     this.root = document.createElement('div');
@@ -176,7 +182,7 @@ export class Hud {
       stats.eliminated.azure ? '청람 멸망' : `청람 ${stats.unitCounts.azure}`,
       stats.eliminated.crimson ? '적월 멸망' : `적월 ${stats.unitCounts.crimson}`,
     ];
-    if (this.playMode === 'sandbox') {
+    if (this.playMode === 'sandbox' || this.challengeFormat === 'triple') {
       outposts.push(`황토 ${stats.outpostCounts.amber}`);
       units.push(stats.eliminated.amber ? '황토 멸망' : `황토 ${stats.unitCounts.amber}`);
     }
@@ -217,10 +223,15 @@ export class Hud {
   setRelations(relations: Map<FactionId, Relation>): void {
     this.relationList.replaceChildren();
     if (this.playMode === 'challenge') {
-      const summary = document.createElement('div');
-      summary.className = 'relation-row relation-static';
-      summary.innerHTML = '<span>작전 관계</span><strong class="relation-hostile">적월 적대</strong>';
-      this.relationList.append(summary);
+      const opponents: FactionId[] = this.challengeFormat === 'triple'
+        ? ['crimson', 'amber']
+        : ['crimson'];
+      for (const opponent of opponents) {
+        const summary = document.createElement('div');
+        summary.className = 'relation-row relation-static';
+        summary.innerHTML = `<span>${FACTIONS[opponent].name}</span><strong class="relation-hostile">적대</strong>`;
+        this.relationList.append(summary);
+      }
       return;
     }
     for (const faction of Object.keys(FACTIONS) as FactionId[]) {
@@ -253,7 +264,9 @@ export class Hud {
     const minutes = Math.floor(state.session.remainingSeconds / 60);
     const seconds = Math.ceil(state.session.remainingSeconds % 60);
     this.challengeTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    this.challengeScore.textContent = `${state.session.scores.azure} : ${state.session.scores.crimson}`;
+    this.challengeScore.textContent = this.challengeFormat === 'triple'
+      ? `${state.session.scores.azure} : ${state.session.scores.crimson} : ${state.session.scores.amber}`
+      : `${state.session.scores.azure} : ${state.session.scores.crimson}`;
     const linkValue = state.session.possessionSeconds > 0
       ? (state.session.possessionSeconds / 15) * 100
       : state.session.linkPercent;
@@ -283,7 +296,11 @@ export class Hud {
         <div class="eyebrow">AFTER ACTION REPORT</div>
         <h2>${title}</h2>
         <p>${reason}</p>
-        <div class="result-score">${snapshot.scores.azure} : ${snapshot.scores.crimson}</div>
+        <div class="result-score">${
+          this.challengeFormat === 'triple'
+            ? `${snapshot.scores.azure} : ${snapshot.scores.crimson} : ${snapshot.scores.amber}`
+            : `${snapshot.scores.azure} : ${snapshot.scores.crimson}`
+        }</div>
         <div class="result-stats">
           <span>거점 점령 <b>${snapshot.captures}</b></span>
           <span>격파 <b>${snapshot.kills}</b></span>
@@ -331,6 +348,8 @@ export class Hud {
   private createMarkup(): string {
     const challengeSelected = this.playMode === 'challenge' ? 'selected' : '';
     const sandboxSelected = this.playMode === 'sandbox' ? 'selected' : '';
+    const duelSelected = this.challengeFormat === 'duel' ? 'selected' : '';
+    const tripleSelected = this.challengeFormat === 'triple' ? 'selected' : '';
     return `
       <div class="top-bar">
         <div class="brand">PROJECT BRICK WARFARE</div>
@@ -343,7 +362,13 @@ export class Hud {
       </div>
       <section class="challenge-panel hidden" data-ui="challenge-panel">
         <div><small>남은 시간</small><strong data-ui="challenge-timer">7:00</strong></div>
-        <div><small>청람 : 적월</small><strong data-ui="challenge-score">0 : 0</strong></div>
+        <div><small>${
+          this.challengeFormat === 'triple'
+            ? '청람 : 적월 : 황토'
+            : '청람 : 적월'
+        }</small><strong data-ui="challenge-score">${
+          this.challengeFormat === 'triple' ? '0 : 0 : 0' : '0 : 0'
+        }</strong></div>
         <div class="command-link">
           <small data-ui="link-label">빙의 준비 완료</small>
           <span><i data-ui="link-fill"></i></span>
@@ -398,11 +423,22 @@ export class Hud {
           <div class="mode-selector">
             <button class="mode-card ${challengeSelected}" type="button" data-mode="challenge">
               <strong>AI CHALLENGE</strong>
-              <span>7분 · 2개 진영 · 제한 자원 · 적응형 AI</span>
+              <span>7분 · 2/3개 진영 선택 · 제한 자원 · 적응형 AI</span>
             </button>
             <button class="mode-card ${sandboxSelected}" type="button" data-mode="sandbox">
               <strong>SANDBOX</strong>
               <span>3개 진영 · 무한 배치 · 랜덤 절차적 전장</span>
+            </button>
+          </div>
+          <div class="format-selector ${this.playMode === 'challenge' ? '' : 'hidden'}">
+            <span>CHALLENGE FORMAT</span>
+            <button class="${duelSelected}" type="button" data-format="duel">
+              1 VS 1
+              <small>2개 진영 · 시작 거점 각 3개</small>
+            </button>
+            <button class="${tripleSelected}" type="button" data-format="triple">
+              1 VS 1 VS 1
+              <small>3개 진영 · 시작 거점 각 3개</small>
             </button>
           </div>
           <div class="feature-row">
@@ -433,6 +469,14 @@ export class Hud {
           return;
         }
         this.callbacks.onModeSelect(mode);
+      });
+    }
+    for (const formatButton of this.root.querySelectorAll<HTMLButtonElement>('[data-format]')) {
+      formatButton.addEventListener('click', () => {
+        const format = formatButton.dataset.format as ChallengeFormat;
+        if (format !== this.challengeFormat) {
+          this.callbacks.onFormatSelect(format);
+        }
       });
     }
     this.require<HTMLButtonElement>('[class="possess-button"]').addEventListener(

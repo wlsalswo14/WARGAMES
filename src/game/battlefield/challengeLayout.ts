@@ -1,36 +1,85 @@
 import type { TerrainProfile } from '../math';
+import type { ChallengeFormat } from '../modes/PlayMode';
 import type { FactionId } from '../types';
 import type { BattlefieldTheme } from './themes';
 import type { BaseLayout, OutpostLayout } from './layout';
 import type { StructurePlan } from './structurePlans';
 
-export const CHALLENGE_OUTPOSTS: OutpostLayout[] = [
-  { x: -132, z: 0, owner: 'azure' },
-  { x: -78, z: -68, owner: null },
-  { x: -58, z: 72, owner: null },
-  { x: 0, z: 0, owner: null },
-  { x: 58, z: -72, owner: null },
-  { x: 78, z: 68, owner: null },
-  { x: 132, z: 0, owner: 'crimson' },
-];
+export interface ChallengeLayout {
+  outposts: OutpostLayout[];
+  bases: Record<FactionId, BaseLayout>;
+  staging: Record<FactionId, Array<{ x: number; z: number }>>;
+}
 
-export const CHALLENGE_BASES: Record<FactionId, BaseLayout> = {
-  azure: { x: -174, z: 0, yaw: Math.PI / 2 },
-  crimson: { x: 174, z: 0, yaw: -Math.PI / 2 },
-  amber: { x: 0, z: 220, yaw: Math.PI },
+const DUEL_LAYOUT: ChallengeLayout = {
+  outposts: [
+    { x: -210, z: -84, owner: 'azure' },
+    { x: -224, z: 0, owner: 'azure' },
+    { x: -210, z: 84, owner: 'azure' },
+    { x: -42, z: -72, owner: null },
+    { x: 0, z: 0, owner: null },
+    { x: 42, z: 72, owner: null },
+    { x: 210, z: -84, owner: 'crimson' },
+    { x: 224, z: 0, owner: 'crimson' },
+    { x: 210, z: 84, owner: 'crimson' },
+  ],
+  bases: {
+    azure: { x: -282, z: 0, yaw: Math.PI / 2 },
+    crimson: { x: 282, z: 0, yaw: -Math.PI / 2 },
+    amber: { x: 0, z: 330, yaw: Math.PI },
+  },
+  staging: {
+    azure: [
+      { x: -252, z: -126 },
+      { x: -252, z: 126 },
+    ],
+    crimson: [
+      { x: 252, z: -126 },
+      { x: 252, z: 126 },
+    ],
+    amber: [],
+  },
 };
 
-export const CHALLENGE_STAGING: Record<FactionId, Array<{ x: number; z: number }>> = {
-  azure: [
-    { x: -152, z: -56 },
-    { x: -146, z: 58 },
+const TRIPLE_LAYOUT: ChallengeLayout = {
+  outposts: [
+    { x: -205, z: -158, owner: 'azure' },
+    { x: -190, z: -102, owner: 'azure' },
+    { x: -145, z: -145, owner: 'azure' },
+    { x: 205, z: -158, owner: 'crimson' },
+    { x: 190, z: -102, owner: 'crimson' },
+    { x: 145, z: -145, owner: 'crimson' },
+    { x: -60, z: 210, owner: 'amber' },
+    { x: 0, z: 224, owner: 'amber' },
+    { x: 60, z: 210, owner: 'amber' },
+    { x: 0, z: -48, owner: null },
+    { x: -76, z: 65, owner: null },
+    { x: 76, z: 65, owner: null },
   ],
-  crimson: [
-    { x: 152, z: 56 },
-    { x: 146, z: -58 },
-  ],
-  amber: [],
+  bases: {
+    azure: { x: -268, z: -184, yaw: Math.PI * 0.36 },
+    crimson: { x: 268, z: -184, yaw: -Math.PI * 0.36 },
+    amber: { x: 0, z: 292, yaw: Math.PI },
+  },
+  staging: {
+    azure: [
+      { x: -246, z: -236 },
+      { x: -216, z: -194 },
+    ],
+    crimson: [
+      { x: 246, z: -236 },
+      { x: 216, z: -194 },
+    ],
+    amber: [
+      { x: -86, z: 264 },
+      { x: 86, z: 264 },
+    ],
+  },
 };
+
+export function getChallengeLayout(format: ChallengeFormat): ChallengeLayout {
+  return format === 'triple' ? TRIPLE_LAYOUT : DUEL_LAYOUT;
+}
 
 const CHALLENGE_TERRAIN: TerrainProfile = {
   phaseX: 173,
@@ -75,6 +124,12 @@ export const CHALLENGE_STRUCTURES: StructurePlan[] = [
   cityBuilding('tower-east', 106, -27, 14, 52, 11, -0.08, 0x7f7066),
   cityBuilding('north-landmark', 34, 105, 13, 60, 12, 0.12, 0x657177),
   cityBuilding('south-landmark', -34, -106, 13, 60, 12, -0.12, 0x786c63),
+  cityBuilding('west-outskirts', -164, 28, 13, 44, 11, 0.04, 0x6a7478),
+  cityBuilding('east-outskirts', 164, -28, 13, 44, 11, -0.04, 0x796e66),
+  cityBuilding('southwest-block', -92, -142, 16, 34, 12, 0.12, 0x6d746d),
+  cityBuilding('southeast-block', 92, -142, 16, 34, 12, -0.12, 0x75706b),
+  cityBuilding('northwest-block', -122, 142, 14, 40, 11, Math.PI / 2, 0x667176),
+  cityBuilding('northeast-block', 122, 142, 14, 40, 11, Math.PI / 2, 0x7a6f66),
   wall('west-barricade', -124, -22, 25, 7, Math.PI / 2, 0x315e9b, 'azure'),
   wall('east-barricade', 124, 22, 25, 7, Math.PI / 2, 0x8f343c, 'crimson'),
   wall('central-wall-north', -20, 16, 30, 6, 0.15, 0x5f6767),

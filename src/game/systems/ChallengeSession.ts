@@ -5,10 +5,7 @@ export type ChallengeFinishReason =
   | 'headquarters'
   | 'elimination';
 
-export interface ChallengeScore {
-  azure: number;
-  crimson: number;
-}
+export type ChallengeScore = Record<FactionId, number>;
 
 export interface ChallengeSessionSnapshot {
   remainingSeconds: number;
@@ -28,11 +25,16 @@ interface SessionOptions {
   duration: number;
   possessionDuration: number;
   possessionRecharge: number;
+  activeFactions: readonly FactionId[];
 }
 
 export class ChallengeSession {
   private remainingSeconds: number;
-  private readonly scores: ChallengeScore = { azure: 0, crimson: 0 };
+  private readonly scores: ChallengeScore = {
+    azure: 0,
+    crimson: 0,
+    amber: 0,
+  };
   private linkPercent = 100;
   private possessionSeconds = 0;
   private scoreTick = 1;
@@ -73,17 +75,13 @@ export class ChallengeSession {
     this.scoreTick -= delta;
     if (this.scoreTick <= 0) {
       this.scoreTick += 1;
-      this.scores.azure += outpostCounts.azure * 2;
-      this.scores.crimson += outpostCounts.crimson * 2;
+      for (const faction of this.options.activeFactions) {
+        this.scores[faction] += outpostCounts[faction] * 2;
+      }
     }
 
     if (this.remainingSeconds <= 0) {
-      const winner = this.scores.azure === this.scores.crimson
-        ? null
-        : this.scores.azure > this.scores.crimson
-          ? 'azure'
-          : 'crimson';
-      this.finish(winner, 'timeout');
+      this.finish(this.findLeader(), 'timeout');
     }
     return this.snapshot();
   }
@@ -106,7 +104,7 @@ export class ChallengeSession {
   }
 
   recordCapture(faction: FactionId): void {
-    if (this.finished || (faction !== 'azure' && faction !== 'crimson')) {
+    if (this.finished || !this.options.activeFactions.includes(faction)) {
       return;
     }
     this.scores[faction] += 80;
@@ -116,7 +114,7 @@ export class ChallengeSession {
   }
 
   recordKill(attacker: FactionId): void {
-    if (this.finished || (attacker !== 'azure' && attacker !== 'crimson')) {
+    if (this.finished || !this.options.activeFactions.includes(attacker)) {
       return;
     }
     this.scores[attacker] += 20;
@@ -161,5 +159,15 @@ export class ChallengeSession {
       kills: this.kills,
       deceptions: this.deceptions,
     };
+  }
+
+  private findLeader(): FactionId | null {
+    const ranked = this.options.activeFactions
+      .map((faction) => ({ faction, score: this.scores[faction] }))
+      .sort((left, right) => right.score - left.score);
+    if (ranked.length === 0 || ranked[0].score === ranked[1]?.score) {
+      return null;
+    }
+    return ranked[0].faction;
   }
 }
