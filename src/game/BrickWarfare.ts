@@ -730,7 +730,11 @@ export class BrickWarfare {
         continue;
       }
       for (const other of this.units) {
-        if (other === unit || other.destroyed) {
+        if (
+          other === unit
+          || other.destroyed
+          || other.faction === unit.faction
+        ) {
           continue;
         }
         const collisionRadius = (unit.collisionRadius + other.collisionRadius) * 0.78;
@@ -1390,7 +1394,14 @@ export class BrickWarfare {
       );
       return;
     }
-    if (this.challengeSession && !this.challengeSession.beginPossession()) {
+    const possessionLimited = this.playMode === 'challenge'
+      && this.modeConfig.possessionDuration !== null
+      && this.modeConfig.possessionRecharge > 0;
+    if (
+      possessionLimited
+      && this.challengeSession
+      && !this.challengeSession.beginPossession()
+    ) {
       const link = this.challengeSession.snapshot().linkPercent;
       this.hud.notify(
         '지휘 링크 재충전 중',
@@ -1427,7 +1438,9 @@ export class BrickWarfare {
     this.godPitch = -0.32;
     this.possessedUnit.setPossessed(false);
     this.possessedUnit = null;
-    this.challengeSession?.endPossession();
+    if (this.playMode === 'challenge') {
+      this.challengeSession?.endPossession();
+    }
     this.mode = 'god';
     this.hud.setMode(this.mode);
     this.input.unlockPointer();
