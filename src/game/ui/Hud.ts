@@ -79,6 +79,7 @@ export class Hud {
   private currentFaction: FactionId = 'azure';
   private currentMode: GameMode = 'god';
   private pointerLocked = false;
+  private unlimitedDeployment = false;
 
   constructor(
     container: HTMLElement,
@@ -129,6 +130,7 @@ export class Hud {
   }
 
   configureMode(config: PlayModeConfig): void {
+    this.unlimitedDeployment = config.unlimitedDeployment;
     this.factionButton.classList.toggle('hidden', !config.enableFactionCycle);
     this.factionPanel.classList.toggle('compact', !config.enableDiplomacy);
     for (const [kind, button] of this.deployButtons) {
@@ -170,7 +172,9 @@ export class Hud {
   }
 
   setResources(amount: number): void {
-    this.resourcesLabel.textContent = Math.floor(amount).toString();
+    this.resourcesLabel.textContent = this.unlimitedDeployment
+      ? '∞'
+      : Math.floor(amount).toString();
   }
 
   setStats(stats: BattlefieldStats): void {
@@ -423,7 +427,7 @@ export class Hud {
           <div class="mode-selector">
             <button class="mode-card ${challengeSelected}" type="button" data-mode="challenge">
               <strong>AI CHALLENGE</strong>
-              <span>7분 · 2/3개 진영 선택 · 제한 자원 · 적응형 AI</span>
+              <span>7분 · 2/3개 진영 선택 · 무제한 God Mode · 적응형 AI</span>
             </button>
             <button class="mode-card ${sandboxSelected}" type="button" data-mode="sandbox">
               <strong>SANDBOX</strong>

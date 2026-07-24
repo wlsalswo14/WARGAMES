@@ -507,6 +507,7 @@ export class BrickWarfare {
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
     }
+    this.checkDroneImpactCollisions();
     this.resolveStructureCollisions();
     this.checkAircraftCollisions();
     for (const unit of this.units) {
@@ -650,6 +651,60 @@ export class BrickWarfare {
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
+  }
+
+  private checkDroneImpactCollisions(): void {
+    for (const drone of this.units) {
+      if (drone.destroyed || drone.kind !== 'drone') {
+        continue;
+      }
+      const hitHostileUnit = this.units.some((candidate) => (
+        candidate !== drone
+        && !candidate.destroyed
+        && this.diplomacy.isHostile(drone.faction, candidate.faction)
+        && this.segmentHitsUnit(
+          drone.previousPosition,
+          drone.position,
+          candidate,
+          drone.collisionRadius * 0.72,
+        )
+      ));
+      const hitStructure = this.structures.some((structure) => (
+        !structure.destroyed
+        && structure.intersectsWorldSegment(
+          drone.previousPosition,
+          drone.position,
+          drone.collisionRadius * 0.62,
+        )
+      ));
+      if (hitHostileUnit || hitStructure) {
+        this.combat.detonateDrone(
+          drone,
+          this.units,
+          this.structures,
+        );
+      }
+    }
+  }
+
+  private segmentHitsUnit(
+    from: Vector3,
+    to: Vector3,
+    target: Unit,
+    padding: number,
+  ): boolean {
+    const segment = to.clone().sub(from);
+    const lengthSquared = segment.lengthSq();
+    const progress = lengthSquared <= 0.0001
+      ? 0
+      : clamp(
+          target.position.clone().sub(from).dot(segment) / lengthSquared,
+          0,
+          1,
+        );
+    const closest = from.clone().addScaledVector(segment, progress);
+    const radius = target.collisionRadius + padding;
+    return closest.distanceToSquared(target.position) <= radius * radius;
   }
 
   private checkAircraftCollisions(): void {
@@ -1408,7 +1463,8 @@ export class BrickWarfare {
       return;
     }
     if (
-      this.playMode === 'challenge'
+      !this.modeConfig.unlimitedDeployment
+      && this.playMode === 'challenge'
       && (kind === 'infantry'
         || kind === 'tank'
         || kind === 'fighter'
