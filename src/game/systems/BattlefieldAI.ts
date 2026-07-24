@@ -1,10 +1,12 @@
 import { Vector3 } from 'three';
-import { FACTIONS } from '../config';
+import { FACTIONS, WORLD } from '../config';
 import { terrainLineOfSight } from '../math';
 import type { AttackMode, FactionId } from '../types';
+import type { BrickStructure } from '../entities/BrickStructure';
 import type { Unit } from '../entities/Unit';
 import type { Outpost } from '../entities/Outpost';
 import type { DiplomacySystem } from './DiplomacySystem';
+import { NavigationSystem } from './NavigationSystem';
 
 export type Strategy = 'assault' | 'capture' | 'defend' | 'air-superiority' | 'entrench';
 
@@ -23,6 +25,7 @@ export class BattlefieldAI {
   private readonly priorityObjectives = new Map<FactionId, PriorityObjective>();
   private readonly targetSearchCooldowns = new Map<string, number>();
   private readonly objectiveAssignments = new Map<string, string>();
+  private readonly navigation = new NavigationSystem();
   private readonly scratch = new Vector3();
   private readonly lineStart = new Vector3();
   private readonly lineEnd = new Vector3();
@@ -43,6 +46,7 @@ export class BattlefieldAI {
     delta: number,
     units: Unit[],
     outposts: Outpost[],
+    structures: BrickStructure[],
     diplomacy: DiplomacySystem,
     wind: Vector3,
     fire: (unit: Unit, target: Vector3, mode: AttackMode) => void,
@@ -69,6 +73,7 @@ export class BattlefieldAI {
           this.objectiveAssignments.delete(unitId);
         }
       }
+      this.navigation.cleanup(activeIds);
     }
     for (const unit of units) {
       if (unit.destroyed || unit.possessed) {
@@ -82,7 +87,13 @@ export class BattlefieldAI {
             unit.position.y,
           );
         }
-        const distance = unit.steerToward(destination, delta, wind);
+        const distance = this.navigation.steer(
+          unit,
+          destination,
+          delta,
+          wind,
+          structures,
+        );
         if (distance < (unit.isAircraft ? 9 : 2.5)) {
           unit.order = { type: 'hold', destination: unit.order.destination.clone() };
         }
@@ -94,13 +105,29 @@ export class BattlefieldAI {
           continue;
         }
       }
+      const objective = this.findObjective(unit, outposts, diplomacy);
       let target = unit.targetId ? unitsById.get(unit.targetId) ?? null : null;
       if (target && !this.isValidCombatTarget(unit, target, diplomacy)) {
         target = null;
       }
+      if (
+        target
+        && objective
+        && !this.shouldEngageWhileCapturing(unit, target, objective)
+      ) {
+        target = null;
+        unit.targetId = null;
+      }
       const searchCooldown = (this.targetSearchCooldowns.get(unit.id) ?? 0) - delta;
       if (!target && searchCooldown <= 0) {
         target = this.findCombatTarget(unit, units, diplomacy);
+        if (
+          target
+          && objective
+          && !this.shouldEngageWhileCapturing(unit, target, objective)
+        ) {
+          target = null;
+        }
         const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
         this.targetSearchCooldowns.set(unit.id, 0.28 + (unitNumber % 7) * 0.035);
       } else {
@@ -125,11 +152,19 @@ export class BattlefieldAI {
             continue;
           } else if (specialReady && unit.kind !== 'drone') {
             fire(unit, aimPoint, 'special');
-            continue;
           } else if (normalReady) {
             fire(unit, aimPoint, 'normal');
-            continue;
           }
+        }
+        if (objective) {
+          this.advanceToObjective(
+            unit,
+            objective,
+            delta,
+            wind,
+            structures,
+          );
+          continue;
         }
         const preferredRange = unit.kind === 'tank' ? unit.stats.range * 0.62 : unit.stats.range * 0.42;
         if (distance > preferredRange) {
@@ -137,7 +172,7 @@ export class BattlefieldAI {
           if (unit.isAircraft) {
             destination.y += unit.kind === 'fighter' ? 34 : 18;
           }
-          unit.steerToward(destination, delta, wind);
+          this.navigation.steer(unit, destination, delta, wind, structures);
         } else if (!unit.isAircraft) {
           unit.moveGround(0, 0, delta);
         }
@@ -145,27 +180,48 @@ export class BattlefieldAI {
       }
 
       unit.targetId = null;
-      const objective = this.findObjective(unit, outposts, diplomacy);
       if (objective) {
-        this.scratch.copy(objective.root.position);
-        this.addFormationOffset(this.scratch, unit, 10);
-        if (unit.isAircraft) {
-          this.scratch.y += unit.kind === 'fighter' ? 30 : 15;
-        }
-        const distance = unit.steerToward(this.scratch, delta, wind);
-        if (distance < 6 && !unit.isAircraft) {
-          unit.moveGround(0, 0, delta);
-        }
+        this.advanceToObjective(
+          unit,
+          objective,
+          delta,
+          wind,
+          structures,
+        );
       } else if (unit.isAircraft) {
         const patrol = new Vector3(
           Math.sin(Number.parseInt(unit.id.split('-')[1], 10) * 2.3) * 90,
           unit.kind === 'fighter' ? 42 : 18,
           Math.cos(Number.parseInt(unit.id.split('-')[1], 10) * 1.7) * 90,
         );
-        unit.steerToward(patrol, delta, wind);
+        this.navigation.steer(unit, patrol, delta, wind, structures);
       } else {
         unit.moveGround(0, 0, delta);
       }
+    }
+  }
+
+  private advanceToObjective(
+    unit: Unit,
+    objective: Outpost,
+    delta: number,
+    wind: Vector3,
+    structures: BrickStructure[],
+  ): void {
+    this.scratch.copy(objective.root.position);
+    this.addFormationOffset(this.scratch, unit, 10);
+    if (unit.isAircraft) {
+      this.scratch.y += unit.kind === 'fighter' ? 30 : 15;
+    }
+    const distance = this.navigation.steer(
+      unit,
+      this.scratch,
+      delta,
+      wind,
+      structures,
+    );
+    if (distance < 6 && !unit.isAircraft) {
+      unit.moveGround(0, 0, delta);
     }
   }
 
@@ -262,6 +318,26 @@ export class BattlefieldAI {
     return terrainLineOfSight(this.lineStart, this.lineEnd);
   }
 
+  private shouldEngageWhileCapturing(
+    unit: Unit,
+    target: Unit,
+    objective: Outpost,
+  ): boolean {
+    const objectiveDistance = unit.position.distanceTo(objective.root.position);
+    if (objectiveDistance <= WORLD.outpostCaptureRadius * 0.9) {
+      return true;
+    }
+    const immediateThreatRange = Math.min(
+      28,
+      Math.max(14, unit.stats.range * 0.3),
+    );
+    if (unit.position.distanceTo(target.position) <= immediateThreatRange) {
+      return true;
+    }
+    return target.position.distanceTo(objective.root.position)
+      <= WORLD.outpostCaptureRadius * 1.35;
+  }
+
   private findObjective(
     unit: Unit,
     outposts: Outpost[],
@@ -290,29 +366,25 @@ export class BattlefieldAI {
       }
     }
 
-    const recoveryOutposts = needsRecovery
-      ? outposts.filter((outpost) => outpost.owner !== unit.faction)
-      : [];
-    const hostileOutposts = outposts.filter((outpost) => (
-      outpost.owner !== null
-      && outpost.owner !== unit.faction
-      && diplomacy.isHostile(unit.faction, outpost.owner)
-    ));
-    const neutralOutposts = outposts.filter((outpost) => outpost.owner === null);
-    const candidates = needsRecovery
-      ? recoveryOutposts
-      : hostileOutposts.length > 0
-        ? hostileOutposts
-        : neutralOutposts;
+    const candidates = outposts.filter(
+      (outpost) => this.isCaptureObjective(
+        unit,
+        outpost,
+        diplomacy,
+        needsRecovery,
+      ),
+    );
     if (candidates.length === 0) {
       return null;
     }
     const ranked = candidates
       .map((outpost) => ({
         outpost,
-        distance: unit.position.distanceToSquared(outpost.root.position),
+        score: unit.position.distanceToSquared(outpost.root.position)
+          * (outpost.owner === null ? 0.52 : 1)
+          * (outpost.captureFaction === unit.faction ? 0.58 : 1),
       }))
-      .sort((left, right) => left.distance - right.distance);
+      .sort((left, right) => left.score - right.score);
     const selectionWindow = Math.min(3, ranked.length);
     const objective = ranked[squadNumber % selectionWindow].outpost;
     this.objectiveAssignments.set(unit.id, objective.id);

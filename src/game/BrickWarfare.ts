@@ -491,6 +491,7 @@ export class BrickWarfare {
         aiDelta,
         this.units,
         this.outposts,
+        this.structures,
         this.diplomacy,
         this.world.wind,
         (unit, target, mode) => {

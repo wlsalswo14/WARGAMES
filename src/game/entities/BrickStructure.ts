@@ -213,6 +213,65 @@ export class BrickStructure {
     return maximumTime >= 0 && minimumTime <= 1;
   }
 
+  findNavigationDetour(
+    from: Vector3,
+    to: Vector3,
+    padding: number,
+    sidePreference: number,
+  ): Vector3 | null {
+    if (this.destroyed || !this.intersectsWorldSegment(from, to, padding)) {
+      return null;
+    }
+    const localFrom = this.root.worldToLocal(from.clone());
+    const localTo = this.root.worldToLocal(to.clone());
+    const clearance = padding + 2.5;
+    const corners = [
+      new Vector3(
+        this.localBounds.min.x - clearance,
+        localFrom.y,
+        this.localBounds.min.z - clearance,
+      ),
+      new Vector3(
+        this.localBounds.min.x - clearance,
+        localFrom.y,
+        this.localBounds.max.z + clearance,
+      ),
+      new Vector3(
+        this.localBounds.max.x + clearance,
+        localFrom.y,
+        this.localBounds.min.z - clearance,
+      ),
+      new Vector3(
+        this.localBounds.max.x + clearance,
+        localFrom.y,
+        this.localBounds.max.z + clearance,
+      ),
+    ];
+    const routeX = localTo.x - localFrom.x;
+    const routeZ = localTo.z - localFrom.z;
+    let best: Vector3 | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const corner of corners) {
+      const worldCorner = this.root.localToWorld(corner.clone());
+      worldCorner.y = from.y;
+      if (this.intersectsWorldSegment(from, worldCorner, padding * 0.55)) {
+        continue;
+      }
+      const cornerX = corner.x - localFrom.x;
+      const cornerZ = corner.z - localFrom.z;
+      const side = Math.sign(routeX * cornerZ - routeZ * cornerX) || 1;
+      const sidePenalty = side === sidePreference ? 0 : 5;
+      const score = from.distanceTo(worldCorner)
+        + worldCorner.distanceTo(to)
+        + sidePenalty;
+      if (score < bestScore) {
+        best = worldCorner;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
   damageAt(worldPoint: Vector3, radius: number, damage: number, impulse: Vector3): number {
     let destroyedCount = 0;
     const localPoint = this.root.worldToLocal(worldPoint.clone());
