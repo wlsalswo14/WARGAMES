@@ -140,6 +140,27 @@ export class BattlefieldAI {
         const normalReady = unit.canFire('normal');
         const specialReady = unit.kind !== 'infantry' && unit.canFire('special');
         if (
+          unit.kind === 'drone'
+          && specialReady
+          && this.shouldLaunchDroneStrike(unit, target, objective)
+        ) {
+          const detonationDistance = unit.collisionRadius + target.collisionRadius + 1.4;
+          if (distance <= detonationDistance) {
+            fire(unit, target.position, 'suicide');
+          } else {
+            this.scratch.copy(target.position);
+            this.scratch.y += Math.min(2, target.collisionRadius * 0.45);
+            this.navigation.steer(
+              unit,
+              this.scratch,
+              delta,
+              wind,
+              structures,
+            );
+          }
+          continue;
+        }
+        if (
           distance <= unit.stats.range
           && (normalReady || specialReady)
           && this.hasTerrainLineOfSight(unit, target)
@@ -147,10 +168,7 @@ export class BattlefieldAI {
           const aimPoint = target.position.clone().add(
             new Vector3(0, target.collisionRadius * 0.45, 0),
           );
-          if (unit.kind === 'drone' && specialReady && distance <= 8) {
-            fire(unit, aimPoint, 'suicide');
-            continue;
-          } else if (specialReady && unit.kind !== 'drone') {
+          if (specialReady && unit.kind !== 'drone') {
             fire(unit, aimPoint, 'special');
           } else if (normalReady) {
             fire(unit, aimPoint, 'normal');
@@ -208,10 +226,39 @@ export class BattlefieldAI {
     wind: Vector3,
     structures: BrickStructure[],
   ): void {
+    const horizontalDistance = this.horizontalDistance(
+      unit.position,
+      objective.root.position,
+    );
     this.scratch.copy(objective.root.position);
-    this.addFormationOffset(this.scratch, unit, 10);
+    this.addFormationOffset(this.scratch, unit, unit.isAircraft ? 8 : 10);
     if (unit.isAircraft) {
-      this.scratch.y += unit.kind === 'fighter' ? 30 : 15;
+      this.scratch.y += unit.kind === 'fighter'
+        ? 30
+        : unit.kind === 'helicopter'
+          ? 16
+          : 12;
+    }
+    if (
+      (unit.kind === 'helicopter' || unit.kind === 'drone')
+      && horizontalDistance <= WORLD.outpostCaptureRadius * 0.78
+    ) {
+      const verticalDifference = this.scratch.y - unit.position.y;
+      unit.faceTarget(objective.root.position, delta);
+      unit.moveAircraft(
+        0,
+        0,
+        Math.max(-0.55, Math.min(0.55, verticalDifference * 0.12)),
+        delta,
+        wind,
+      );
+      return;
+    }
+    if (
+      unit.kind === 'fighter'
+      && horizontalDistance <= WORLD.outpostCaptureRadius * 2.05
+    ) {
+      unit.throttle = Math.max(0.54, Math.min(unit.throttle, 0.58));
     }
     const distance = this.navigation.steer(
       unit,
@@ -323,8 +370,16 @@ export class BattlefieldAI {
     target: Unit,
     objective: Outpost,
   ): boolean {
-    const objectiveDistance = unit.position.distanceTo(objective.root.position);
-    if (objectiveDistance <= WORLD.outpostCaptureRadius * 0.9) {
+    const objectiveDistance = this.horizontalDistance(
+      unit.position,
+      objective.root.position,
+    );
+    const captureRadius = unit.kind === 'fighter'
+      ? WORLD.outpostCaptureRadius * 2.2
+      : unit.isAircraft
+        ? WORLD.outpostCaptureRadius * 1.35
+        : WORLD.outpostCaptureRadius;
+    if (objectiveDistance <= captureRadius * 0.9) {
       return true;
     }
     const immediateThreatRange = Math.min(
@@ -336,6 +391,19 @@ export class BattlefieldAI {
     }
     return target.position.distanceTo(objective.root.position)
       <= WORLD.outpostCaptureRadius * 1.35;
+  }
+
+  private shouldLaunchDroneStrike(
+    unit: Unit,
+    target: Unit,
+    objective: Outpost | null,
+  ): boolean {
+    if (unit.position.distanceTo(target.position) > 32) {
+      return false;
+    }
+    return !objective
+      || this.horizontalDistance(target.position, objective.root.position)
+        <= WORLD.outpostCaptureRadius * 1.45;
   }
 
   private findObjective(
@@ -360,7 +428,10 @@ export class BattlefieldAI {
       const priorityOutpost = outposts.find(
         (outpost) => outpost.id === priority.outpostId,
       );
-      if (priorityOutpost) {
+      if (
+        priorityOutpost
+        && this.isCaptureObjective(unit, priorityOutpost, diplomacy, needsRecovery)
+      ) {
         this.objectiveAssignments.set(unit.id, priorityOutpost.id);
         return priorityOutpost;
       }
@@ -413,5 +484,9 @@ export class BattlefieldAI {
     destination.x += Math.cos(angle) * radius;
     destination.z += Math.sin(angle) * radius;
     return destination;
+  }
+
+  private horizontalDistance(left: Vector3, right: Vector3): number {
+    return Math.hypot(left.x - right.x, left.z - right.z);
   }
 }

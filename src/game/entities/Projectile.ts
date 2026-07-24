@@ -16,7 +16,9 @@ let nextProjectileId = 1;
 const normalProjectileGeometry = new SphereGeometry(0.13, 7, 5);
 const specialProjectileGeometry = new SphereGeometry(0.48, 9, 6);
 const bulletMaterial = new MeshBasicMaterial({ color: 0xfff2b8 });
-const specialMaterial = new MeshBasicMaterial({ color: 0xff7a32 });
+const tankShellMaterial = new MeshBasicMaterial({ color: 0xff7a32 });
+const fighterMissileMaterial = new MeshBasicMaterial({ color: 0x8fe9ff });
+const helicopterRocketMaterial = new MeshBasicMaterial({ color: 0xffc04f });
 
 export class Projectile {
   readonly id = `projectile-${nextProjectileId++}`;
@@ -50,11 +52,25 @@ export class Projectile {
     this.blastRadius = weapon.blastRadius;
     this.destroysStructures = weapon.destroysStructures;
     this.life = attackMode === 'special' ? 6 : source.kind === 'fighter' ? 3 : 4.5;
+    const specialMaterial = source.kind === 'fighter'
+      ? fighterMissileMaterial
+      : source.kind === 'helicopter'
+        ? helicopterRocketMaterial
+        : tankShellMaterial;
     this.mesh = new Mesh(
       attackMode === 'special' ? specialProjectileGeometry : normalProjectileGeometry,
       attackMode === 'special' ? specialMaterial : bulletMaterial,
     );
-    this.mesh.scale.z = attackMode === 'special' ? 2.8 : 4.2;
+    if (attackMode === 'special') {
+      const length = source.kind === 'fighter'
+        ? 4.4
+        : source.kind === 'helicopter'
+          ? 3.6
+          : 2.8;
+      this.mesh.scale.set(0.82, 0.82, length);
+    } else {
+      this.mesh.scale.z = 4.2;
+    }
     this.mesh.position.copy(position);
     this.velocity = direction.normalize().multiplyScalar(weapon.projectileSpeed);
   }

@@ -149,6 +149,17 @@ export class Unit {
     return names[this.kind];
   }
 
+  get specialAttackName(): string {
+    const names: Record<UnitKind, string> = {
+      infantry: '',
+      tank: '철갑 주포',
+      fighter: '공대지 미사일',
+      helicopter: '중형 로켓',
+      drone: '돌입 자폭',
+    };
+    return names[this.kind];
+  }
+
   setSelected(selected: boolean): void {
     this.selected = selected;
     this.selectionRing.scale.setScalar(selected ? 1.32 : 1);

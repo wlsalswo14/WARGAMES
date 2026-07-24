@@ -211,10 +211,8 @@ export class Hud {
     const specialState = unit.kind === 'infantry'
       ? ''
       : unit.specialReloadTimer > 0
-        ? ` · 특수 ${unit.specialReloadTimer.toFixed(1)}초`
-        : unit.kind === 'drone'
-          ? ' · 자폭 준비'
-          : ' · 특수 준비';
+        ? ` · ${unit.specialAttackName} ${unit.specialReloadTimer.toFixed(1)}초`
+        : ` · ${unit.specialAttackName} 준비`;
     this.selectionHealth.textContent = unit.destroyed
       ? '파괴됨'
       : `${Math.ceil(unit.health)} / ${unit.stats.maxHealth}${specialState}`;

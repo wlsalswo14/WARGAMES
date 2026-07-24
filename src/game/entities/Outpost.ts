@@ -82,8 +82,16 @@ export class Outpost {
       if (unit.destroyed || unit.stats.capturePower <= 0) {
         continue;
       }
-      const distance = unit.position.distanceTo(this.root.position);
-      if (distance <= WORLD.outpostCaptureRadius) {
+      const distance = Math.hypot(
+        unit.position.x - this.root.position.x,
+        unit.position.z - this.root.position.z,
+      );
+      const captureRadius = unit.kind === 'fighter'
+        ? WORLD.outpostCaptureRadius * 2.2
+        : unit.isAircraft
+          ? WORLD.outpostCaptureRadius * 1.35
+          : WORLD.outpostCaptureRadius;
+      if (distance <= captureRadius) {
         presence.set(unit.faction, (presence.get(unit.faction) ?? 0) + 1);
       }
     }
