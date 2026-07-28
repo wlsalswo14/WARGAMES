@@ -145,6 +145,7 @@ src/
 - [30.52초 실제 플레이 영상](submission/PROJECT_BRICK_WARFARE_GAMEPLAY_31S.webm)
 - [게임 설명 원문](docs/GAME_GUIDE.md)
 - [AI 기술 문서 원문](docs/AI_TECHNICAL_DOCUMENT.md)
+- [코드 구조와 변경 위치](docs/ARCHITECTURE.md)
 - [제출 체크리스트](docs/SUBMISSION_CHECKLIST.md)
 - [YouTube 업로드 정보](submission/YOUTUBE_UPLOAD.md)
 

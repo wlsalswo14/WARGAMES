@@ -45,8 +45,6 @@ import { Outpost } from './entities/Outpost';
 import { Unit } from './entities/Unit';
 import { GameInput } from './input/GameInput';
 import {
-  clamp,
-  flatForward,
   resetTerrainStamps,
   sculptTerrain as addTerrainStamp,
   terrainHeight,
@@ -62,13 +60,14 @@ import {
 import { AdaptiveDirector } from './systems/AdaptiveDirector';
 import { BattleAudio } from './systems/BattleAudio';
 import { BattlefieldAI } from './systems/BattlefieldAI';
+import { BattleCamera } from './systems/BattleCamera';
 import { BrickBurstSystem } from './systems/BrickBurstSystem';
 import { ChallengeSession } from './systems/ChallengeSession';
 import { CombatSystem, type CombatKillEvent } from './systems/CombatSystem';
 import { DiplomacySystem } from './systems/DiplomacySystem';
 import { GameLoop } from './systems/GameLoop';
+import { UnitCollisionSystem } from './systems/UnitCollisionSystem';
 import type {
-  CameraView,
   DeployKind,
   DiplomacyEvent,
   FactionId,
@@ -77,14 +76,6 @@ import type {
 } from './types';
 import { Hud } from './ui/Hud';
 import { BattlefieldWorld } from './world/BattlefieldWorld';
-
-interface KillCamera {
-  focus: Vector3;
-  timer: number;
-  duration: number;
-  angle: number;
-  distance: number;
-}
 
 const FORWARD_KEYS = ['KeyW', 'ArrowUp'] as const;
 const BACKWARD_KEYS = ['KeyS', 'ArrowDown'] as const;
@@ -97,6 +88,7 @@ export class BrickWarfare {
   private readonly softwareRendering: boolean;
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(55, 1, 0.1, 2200);
+  private readonly battleCamera = new BattleCamera(this.camera);
   private readonly clock = new Clock();
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
@@ -134,6 +126,7 @@ export class BrickWarfare {
   private readonly brickBursts = new BrickBurstSystem(this.scene);
   private readonly audio = new BattleAudio();
   private readonly combat: CombatSystem;
+  private readonly collisions: UnitCollisionSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
   private readonly challengeSession = this.playMode === 'challenge'
@@ -146,21 +139,13 @@ export class BrickWarfare {
       })
     : null;
   private adaptiveDirector: AdaptiveDirector | null = null;
-  private readonly crashedAircraft = new Set<Unit>();
   private readonly gameLoop = new GameLoop(() => this.frame());
   private mode: GameMode = 'god';
-  private cameraView: CameraView = 'thirdPerson';
   private activeFaction: FactionId = 'azure';
   private selectedUnit: Unit | null = null;
   private possessedUnit: Unit | null = null;
   private deployKind: DeployKind | null = null;
   private simulationRunning = false;
-  private godPosition = new Vector3(0, 92, 180);
-  private godAzimuth = Math.PI;
-  private godPitch = -0.46;
-  private godMoveSpeed = 58;
-  private aimYaw = 0;
-  private aimPitch = -0.08;
   private elapsed = 0;
   private resourceTimer = WORLD.resourceTick;
   private aiSpawnTimer = 7;
@@ -172,7 +157,6 @@ export class BrickWarfare {
   private victoryFaction: FactionId | null = null;
   private adaptiveSyncTimer = 0;
   private challengeResultShown = false;
-  private killCamera: KillCamera | null = null;
   private readonly explodedUnitIds = new Set<string>();
   private readonly destroyedAt = new Map<string, number>();
   private readonly reinforcementSequence = new Map<FactionId, number>([
@@ -274,6 +258,20 @@ export class BrickWarfare {
       (position, radius) => this.onWorldExplosion(position, radius),
       this.playMode === 'challenge' ? 72 : WORLD.maxProjectiles,
     );
+    this.collisions = new UnitCollisionSystem({
+      units: this.units,
+      structures: this.structures,
+      outposts: this.outposts,
+      world: this.world,
+      diplomacy: this.diplomacy,
+      detonateDrone: (drone) => {
+        this.combat.detonateDrone(
+          drone,
+          this.units,
+          this.structures,
+        );
+      },
+    });
     this.ai = new BattlefieldAI((faction, strategy, reason) => {
       this.hud.notify(
         `${FACTIONS[faction].name} 작전 변경`,
@@ -294,7 +292,7 @@ export class BrickWarfare {
     this.createBattlefield();
     this.hud.configureMode(this.modeConfig);
     this.handleResize();
-    this.world.update(this.godPosition);
+    this.world.update(this.battleCamera.godPosition);
     this.updateDiplomacyHud();
   }
 
@@ -473,15 +471,17 @@ export class BrickWarfare {
     const delta = Math.min(maximumSimulationDelta, wallDelta);
     this.elapsed += delta;
     if (this.simulationRunning) {
-      const simulationDelta = this.killCamera ? delta * 0.24 : delta;
+      const simulationDelta = this.battleCamera.isKillCameraActive
+        ? delta * 0.24
+        : delta;
       this.updateSimulation(simulationDelta, wallDelta);
-      this.updateKillCamera(delta);
+      this.battleCamera.updateKillCamera(delta);
     }
-    this.updateCamera(delta);
+    this.battleCamera.update(delta, this.mode, this.possessedUnit);
     this.world.update(
       this.mode === 'possession' && this.possessedUnit
         ? this.possessedUnit.position
-        : this.godPosition,
+        : this.battleCamera.godPosition,
     );
     this.updateHud(delta);
     this.audio.update(
@@ -498,9 +498,14 @@ export class BrickWarfare {
         unit.beginSimulationStep();
       }
     }
-    if (!this.killCamera && this.mode === 'possession' && this.possessedUnit && !this.possessedUnit.destroyed) {
+    if (
+      !this.battleCamera.isKillCameraActive
+      && this.mode === 'possession'
+      && this.possessedUnit
+      && !this.possessedUnit.destroyed
+    ) {
       this.updatePossessedControls(delta);
-    } else if (!this.killCamera && this.mode === 'god') {
+    } else if (!this.battleCamera.isKillCameraActive && this.mode === 'god') {
       this.updateGodControls(delta);
     }
 
@@ -532,9 +537,7 @@ export class BrickWarfare {
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
     }
-    this.checkDroneImpactCollisions();
-    this.resolveStructureCollisions();
-    this.checkAircraftCollisions();
+    this.collisions.update();
     for (const unit of this.units) {
       if (unit.destroyed && !this.explodedUnitIds.has(unit.id)) {
         this.onUnitDestroyed({
@@ -576,7 +579,10 @@ export class BrickWarfare {
     }
     this.updateChallenge(challengeDelta);
 
-    if (this.possessedUnit?.destroyed && !this.killCamera) {
+    if (
+      this.possessedUnit?.destroyed
+      && !this.battleCamera.isKillCameraActive
+    ) {
       this.hud.notify(
         '빙의 연결 종료',
         `${this.possessedUnit.displayName}이 파괴되었습니다.`,
@@ -651,21 +657,12 @@ export class BrickWarfare {
     const verticalInput = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
-    this.godAzimuth += rotateInput * delta * 1.25;
-    const cameraForward = new Vector3(
-      Math.sin(this.godAzimuth) * Math.cos(this.godPitch),
-      Math.sin(this.godPitch),
-      Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
-    ).normalize();
-    const cameraRight = flatForward(this.godAzimuth + Math.PI / 2);
-    const speed = this.godMoveSpeed;
-    this.godPosition.addScaledVector(cameraForward, forwardInput * speed * delta);
-    this.godPosition.addScaledVector(cameraRight, sideInput * speed * delta);
-    this.godPosition.y += verticalInput * speed * delta;
-    this.godPosition.x = clamp(this.godPosition.x, -680, 680);
-    this.godPosition.z = clamp(this.godPosition.z, -680, 680);
-    const minimumHeight = terrainHeight(this.godPosition.x, this.godPosition.z) + 3;
-    this.godPosition.y = clamp(this.godPosition.y, minimumHeight, 340);
+    this.battleCamera.updateGodMovement({
+      forward: forwardInput,
+      side: sideInput,
+      vertical: verticalInput,
+      rotate: rotateInput,
+    }, delta);
   }
 
   private updatePossessedControls(delta: number): void {
@@ -677,155 +674,14 @@ export class BrickWarfare {
     const side = this.inputAxis(RIGHT_KEYS, LEFT_KEYS);
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
-    unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
-  }
-
-  private checkDroneImpactCollisions(): void {
-    for (const drone of this.units) {
-      if (drone.destroyed || drone.kind !== 'drone') {
-        continue;
-      }
-      const hitHostileUnit = this.units.some((candidate) => (
-        candidate !== drone
-        && !candidate.destroyed
-        && this.diplomacy.isHostile(drone.faction, candidate.faction)
-        && this.segmentHitsUnit(
-          drone.previousPosition,
-          drone.position,
-          candidate,
-          drone.collisionRadius * 0.72,
-        )
-      ));
-      const hitStructure = this.structures.some((structure) => (
-        !structure.destroyed
-        && structure.intersectsWorldSegment(
-          drone.previousPosition,
-          drone.position,
-          drone.collisionRadius * 0.62,
-        )
-      ));
-      if (hitHostileUnit || hitStructure) {
-        this.combat.detonateDrone(
-          drone,
-          this.units,
-          this.structures,
-        );
-      }
-    }
-  }
-
-  private segmentHitsUnit(
-    from: Vector3,
-    to: Vector3,
-    target: Unit,
-    padding: number,
-  ): boolean {
-    const segment = to.clone().sub(from);
-    const lengthSquared = segment.lengthSq();
-    const progress = lengthSquared <= 0.0001
-      ? 0
-      : clamp(
-          target.position.clone().sub(from).dot(segment) / lengthSquared,
-          0,
-          1,
-        );
-    const closest = from.clone().addScaledVector(segment, progress);
-    const radius = target.collisionRadius + padding;
-    return closest.distanceToSquared(target.position) <= radius * radius;
-  }
-
-  private checkAircraftCollisions(): void {
-    this.crashedAircraft.clear();
-    for (const unit of this.units) {
-      if (unit.destroyed || (unit.kind !== 'fighter' && unit.kind !== 'helicopter')) {
-        continue;
-      }
-      if (unit.terrainCollision || this.world.collidesWithTree(unit.position, unit.collisionRadius)) {
-        this.crashedAircraft.add(unit);
-        continue;
-      }
-      if (
-        this.outposts.some((outpost) => {
-          const distanceX = unit.position.x - outpost.root.position.x;
-          const distanceZ = unit.position.z - outpost.root.position.z;
-          const collisionRadius = unit.collisionRadius + 1.2;
-          return distanceX * distanceX + distanceZ * distanceZ <= collisionRadius * collisionRadius
-            && unit.position.y - unit.collisionRadius <= outpost.root.position.y + 8.4;
-        })
-      ) {
-        this.crashedAircraft.add(unit);
-        continue;
-      }
-      for (const other of this.units) {
-        if (
-          other === unit
-          || other.destroyed
-          || other.faction === unit.faction
-        ) {
-          continue;
-        }
-        const collisionRadius = (unit.collisionRadius + other.collisionRadius) * 0.78;
-        if (unit.position.distanceToSquared(other.position) <= collisionRadius * collisionRadius) {
-          this.crashedAircraft.add(unit);
-          break;
-        }
-      }
-    }
-    for (const unit of this.crashedAircraft) {
-      unit.applyRawDamage(unit.health, unit.faction);
-    }
-  }
-
-  private resolveStructureCollisions(): void {
-    for (const unit of this.units) {
-      if (unit.destroyed) {
-        continue;
-      }
-      const padding = unit.collisionRadius * (unit.isAircraft ? 0.62 : 0.72);
-      if (!this.collidesWithStructure(unit.previousPosition, unit.position, padding)) {
-        continue;
-      }
-      if (unit.kind === 'fighter' || unit.kind === 'helicopter') {
-        unit.applyRawDamage(unit.health, unit.faction);
-        continue;
-      }
-      const attemptedPosition = unit.position.clone();
-      const xMovement = unit.previousPosition.clone().setX(attemptedPosition.x);
-      xMovement.y = attemptedPosition.y;
-      const zMovement = unit.previousPosition.clone().setZ(attemptedPosition.z);
-      zMovement.y = attemptedPosition.y;
-      const verticalMovement = unit.previousPosition.clone().setY(attemptedPosition.y);
-      if (!this.collidesWithStructure(unit.previousPosition, xMovement, padding)) {
-        unit.position.copy(xMovement);
-      } else if (!this.collidesWithStructure(unit.previousPosition, zMovement, padding)) {
-        unit.position.copy(zMovement);
-      } else if (
-        unit.isAircraft
-        && !this.collidesWithStructure(unit.previousPosition, verticalMovement, padding)
-      ) {
-        unit.position.copy(verticalMovement);
-      } else {
-        unit.position.copy(unit.previousPosition);
-      }
-      unit.stopMovement();
-    }
-  }
-
-  private collidesWithStructure(from: Vector3, to: Vector3, padding: number): boolean {
-    const travelDistance = from.distanceTo(to);
-    for (const structure of this.structures) {
-      if (structure.destroyed) {
-        continue;
-      }
-      const broadRadius = structure.collisionRadius + padding + travelDistance;
-      if (from.distanceToSquared(structure.root.position) > broadRadius * broadRadius) {
-        continue;
-      }
-      if (structure.intersectsWorldSegment(from, to, padding)) {
-        return true;
-      }
-    }
-    return false;
+    unit.movePossessed(
+      forward,
+      side,
+      up,
+      this.battleCamera.possessionYaw,
+      delta,
+      this.world.wind,
+    );
   }
 
   private inputAxis(
@@ -834,62 +690,6 @@ export class BrickWarfare {
   ): number {
     return Number(positiveKeys.some((key) => this.input.isDown(key)))
       - Number(negativeKeys.some((key) => this.input.isDown(key)));
-  }
-
-  private updateCamera(delta: number): void {
-    if (this.killCamera) {
-      this.killCamera.angle += delta * 0.52;
-      const desired = this.killCamera.focus.clone().add(new Vector3(
-        Math.sin(this.killCamera.angle) * this.killCamera.distance,
-        this.killCamera.distance * 0.42,
-        Math.cos(this.killCamera.angle) * this.killCamera.distance,
-      ));
-      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 7));
-      this.camera.lookAt(this.killCamera.focus.clone().add(new Vector3(0, 1.1, 0)));
-      return;
-    }
-    if (this.mode === 'god') {
-      const lookDirection = new Vector3(
-        Math.sin(this.godAzimuth) * Math.cos(this.godPitch),
-        Math.sin(this.godPitch),
-        Math.cos(this.godAzimuth) * Math.cos(this.godPitch),
-      ).normalize();
-      this.camera.position.lerp(this.godPosition, 1 - Math.exp(-delta * 14));
-      this.camera.lookAt(this.camera.position.clone().addScaledVector(lookDirection, 120));
-      return;
-    }
-    const unit = this.possessedUnit;
-    if (!unit) {
-      return;
-    }
-    const anchor = unit.position.clone().add(new Vector3(0, unit.kind === 'infantry' ? 2 : unit.isAircraft ? 1.8 : 2.9, 0));
-    const aimDirection = new Vector3(
-      Math.sin(this.aimYaw) * Math.cos(this.aimPitch),
-      Math.sin(this.aimPitch),
-      Math.cos(this.aimYaw) * Math.cos(this.aimPitch),
-    ).normalize();
-    if (this.cameraView === 'firstPerson') {
-      const desired = anchor.clone().addScaledVector(aimDirection, 0.85);
-      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 18));
-      this.camera.lookAt(anchor.clone().addScaledVector(aimDirection, 120));
-    } else {
-      const distance = unit.kind === 'fighter' ? 18 : unit.kind === 'helicopter' ? 14 : unit.kind === 'tank' ? 10 : 7;
-      const height = unit.kind === 'fighter' ? 5.5 : unit.kind === 'tank' ? 3.8 : 2.8;
-      const shoulderOffset = unit.kind === 'fighter'
-        ? 4.2
-        : unit.kind === 'helicopter'
-          ? 3.2
-          : unit.kind === 'tank'
-            ? 2.4
-            : unit.kind === 'drone'
-              ? 1.8
-              : 1.15;
-      const desired = anchor.clone().addScaledVector(aimDirection, -distance);
-      desired.y += height;
-      desired.addScaledVector(flatForward(this.aimYaw + Math.PI / 2), shoulderOffset);
-      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 10));
-      this.camera.lookAt(anchor.clone().addScaledVector(aimDirection, 35));
-    }
   }
 
   private updateOutposts(delta: number): void {
@@ -1197,8 +997,13 @@ export class BrickWarfare {
     } else if (event.code === 'KeyG' && this.mode === 'possession') {
       this.exitPossession();
     } else if (event.code === 'KeyV' && this.mode === 'possession') {
-      this.cameraView = this.cameraView === 'thirdPerson' ? 'firstPerson' : 'thirdPerson';
-      this.hud.notify('시점 전환', this.cameraView === 'firstPerson' ? '1인칭 조종 시점' : '3인칭 추적 시점');
+      const cameraView = this.battleCamera.toggleView();
+      this.hud.notify(
+        '시점 전환',
+        cameraView === 'firstPerson'
+          ? '1인칭 조종 시점'
+          : '3인칭 추적 시점',
+      );
     } else if (event.code === 'Enter' && this.mode === 'god' && this.selectedUnit && !this.selectedUnit.destroyed) {
       this.enterPossession(this.selectedUnit);
     } else if (
@@ -1231,13 +1036,11 @@ export class BrickWarfare {
   }
 
   private handleMouseLook(movementX: number, movementY: number): void {
-    if (this.mode === 'possession') {
-      this.aimYaw += movementX * 0.0023;
-      this.aimPitch = clamp(this.aimPitch - movementY * 0.0019, -1.1, 0.78);
-      return;
-    }
-    this.godAzimuth += movementX * 0.0023;
-    this.godPitch = clamp(this.godPitch - movementY * 0.0019, -1.3, 1.1);
+    this.battleCamera.handleMouseLook(
+      this.mode,
+      movementX,
+      movementY,
+    );
   }
 
   private handlePointerLockChange(locked: boolean): void {
@@ -1249,7 +1052,7 @@ export class BrickWarfare {
 
   private handleWheel(deltaY: number): void {
     if (this.mode === 'god') {
-      this.godMoveSpeed = clamp(this.godMoveSpeed - deltaY * 0.055, 24, 140);
+      this.battleCamera.adjustGodMoveSpeed(deltaY);
     }
   }
 
@@ -1516,9 +1319,7 @@ export class BrickWarfare {
     unit.order = null;
     this.mode = 'possession';
     this.audio.link(true);
-    this.cameraView = 'thirdPerson';
-    this.aimYaw = unit.yaw;
-    this.aimPitch = -0.07;
+    this.battleCamera.beginPossession(unit);
     this.hud.setMode(this.mode);
     this.hud.notify(
       '유닛 빙의 연결',
@@ -1532,10 +1333,7 @@ export class BrickWarfare {
     if (!this.possessedUnit) {
       return;
     }
-    this.godPosition.copy(this.possessedUnit.position);
-    this.godPosition.y += 18;
-    this.godAzimuth = this.possessedUnit.yaw + Math.PI;
-    this.godPitch = -0.32;
+    this.battleCamera.returnToGod(this.possessedUnit);
     this.possessedUnit.setPossessed(false);
     this.possessedUnit = null;
     if (this.playMode === 'challenge') {
@@ -1617,7 +1415,7 @@ export class BrickWarfare {
       const structure = createStructureFromPlan(
         createPlayerBuildingPlan(
           point,
-          this.godAzimuth,
+          this.battleCamera.heading,
           this.activeFaction,
         ),
       );
@@ -1633,7 +1431,7 @@ export class BrickWarfare {
         false,
         this.activeFaction,
       );
-      structure.root.rotation.y = this.godAzimuth;
+      structure.root.rotation.y = this.battleCamera.heading;
       this.structures.push(structure);
       this.scene.add(structure.root);
     } else {
@@ -1743,7 +1541,13 @@ export class BrickWarfare {
     const victimName = `${FACTIONS[event.victim.faction].name} ${event.victim.displayName}`;
 
     if (this.modeConfig.enableKillCamera && (playerDeath || playerKill)) {
-      this.startKillCamera(event.victim, playerDeath);
+      if (playerDeath) {
+        this.exitPossession();
+      }
+      this.battleCamera.startKillCamera(
+        event.victim.position,
+        event.victim.collisionRadius,
+      );
     } else if (Math.random() < 0.4 || event.victim.kind === 'tank' || event.victim.isAircraft) {
       this.hud.notify(
         '전장 손실 보고',
@@ -1763,29 +1567,6 @@ export class BrickWarfare {
         Math.round(8 + tree.scale * 5),
         8 + tree.scale * 3,
       );
-    }
-  }
-
-  private startKillCamera(victim: Unit, playerDeath: boolean): void {
-    if (playerDeath) {
-      this.exitPossession();
-    }
-    this.killCamera = {
-      focus: victim.position.clone(),
-      timer: 3.35,
-      duration: 3.35,
-      angle: this.godAzimuth + Math.PI * 0.65,
-      distance: clamp(8 + victim.collisionRadius * 3.8, 10, 26),
-    };
-  }
-
-  private updateKillCamera(delta: number): void {
-    if (!this.killCamera) {
-      return;
-    }
-    this.killCamera.timer -= delta;
-    if (this.killCamera.timer <= 0) {
-      this.killCamera = null;
     }
   }
 
