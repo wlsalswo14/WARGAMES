@@ -653,7 +653,7 @@ export class BrickWarfare {
 
   private updateGodControls(delta: number): void {
     const forwardInput = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
-    const sideInput = this.inputAxis(RIGHT_KEYS, LEFT_KEYS);
+    const sideInput = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const verticalInput = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
@@ -671,7 +671,7 @@ export class BrickWarfare {
       return;
     }
     const forward = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
-    const side = this.inputAxis(RIGHT_KEYS, LEFT_KEYS);
+    const side = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     unit.movePossessed(

@@ -3,6 +3,9 @@ import { Unit } from '../entities/Unit';
 import { clamp, flatForward, terrainHeight } from '../math';
 import type { CameraView, GameMode } from '../types';
 
+const MOUSE_YAW_SENSITIVITY = 0.0023;
+const MOUSE_PITCH_SENSITIVITY = 0.0019;
+
 interface GodMovement {
   forward: number;
   side: number;
@@ -75,17 +78,17 @@ export class BattleCamera {
     movementY: number,
   ): void {
     if (mode === 'possession') {
-      this.aimYaw += movementX * 0.0023;
+      this.aimYaw -= movementX * MOUSE_YAW_SENSITIVITY;
       this.aimPitch = clamp(
-        this.aimPitch - movementY * 0.0019,
+        this.aimPitch + movementY * MOUSE_PITCH_SENSITIVITY,
         -1.1,
         0.78,
       );
       return;
     }
-    this.godAzimuth += movementX * 0.0023;
+    this.godAzimuth -= movementX * MOUSE_YAW_SENSITIVITY;
     this.godPitch = clamp(
-      this.godPitch - movementY * 0.0019,
+      this.godPitch + movementY * MOUSE_PITCH_SENSITIVITY,
       -1.3,
       1.1,
     );
