@@ -459,13 +459,13 @@ export class Hud {
         거점을 지켜 <b>100점</b>을 먼저 확보
       </div>
       <div class="controls controls-god" data-ui="controls-god">
-        <b>마우스(상하 반전)</b> 시점 · <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>Space/Shift</b> 상승/하강<br />
+        <b>마우스</b> 이동 방향으로 시점 · <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>Space/Shift</b> 상승/하강<br />
         ${this.playMode === 'challenge'
           ? '<b>좌클릭</b> 선택 · <b>1/2/3</b> 거점 명령 · <b>Enter</b> 빙의'
           : '<b>좌클릭</b> 배치/선택 · <b>우클릭</b> 명령 · <b>1~0</b> 도구 · <b>F</b> 진영'}
       </div>
       <div class="controls controls-possession hidden" data-ui="controls-possession">
-        <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>마우스(상하 반전)</b> 조준 · <b>좌/우클릭</b> 일반/특수 공격<br />
+        <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>마우스</b> 이동 방향으로 조준 · <b>좌/우클릭</b> 일반/특수 공격<br />
         <b>Space/Shift</b> 상승/하강 · <b>V</b> 시점 · <b>G/Esc</b> 관찰자 복귀
       </div>
       <div class="damage-vignette" data-ui="damage-vignette"></div>
