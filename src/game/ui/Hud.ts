@@ -28,6 +28,13 @@ interface HudCallbacks {
 interface ChallengeHudState {
   session: ChallengeSessionSnapshot;
   prediction: AdaptivePrediction;
+  objectives: Array<{
+    label: string;
+    owner: FactionId | null;
+    captureFaction: FactionId | null;
+    capturePercent: number;
+    contested: boolean;
+  }>;
 }
 
 const DEPLOYMENTS: Array<{ kind: DeployKind; label: string }> = [
@@ -68,18 +75,21 @@ export class Hud {
   private readonly challengePanel: HTMLDivElement;
   private readonly challengeTimer: HTMLElement;
   private readonly challengeScore: HTMLElement;
+  private readonly objectiveStrip: HTMLElement;
   private readonly linkFill: HTMLElement;
   private readonly linkLabel: HTMLElement;
   private readonly predictionTarget: HTMLElement;
   private readonly predictionConfidence: HTMLElement;
   private readonly tutorial: HTMLDivElement;
   private readonly resultOverlay: HTMLDivElement;
+  private readonly possessButton: HTMLButtonElement;
   private readonly deployButtons = new Map<DeployKind, HTMLButtonElement>();
   private activeDeploy: DeployKind | null = null;
   private currentFaction: FactionId = 'azure';
   private currentMode: GameMode = 'god';
   private pointerLocked = false;
   private unlimitedDeployment = false;
+  private hasDeployments = true;
 
   constructor(
     container: HTMLElement,
@@ -114,12 +124,14 @@ export class Hud {
     this.challengePanel = this.require('[data-ui="challenge-panel"]');
     this.challengeTimer = this.require('[data-ui="challenge-timer"]');
     this.challengeScore = this.require('[data-ui="challenge-score"]');
+    this.objectiveStrip = this.require('[data-ui="objective-strip"]');
     this.linkFill = this.require('[data-ui="link-fill"]');
     this.linkLabel = this.require('[data-ui="link-label"]');
     this.predictionTarget = this.require('[data-ui="prediction-target"]');
     this.predictionConfidence = this.require('[data-ui="prediction-confidence"]');
     this.tutorial = this.require('[data-ui="tutorial"]');
     this.resultOverlay = this.require('[data-ui="result-overlay"]');
+    this.possessButton = this.require('[data-ui="possess-button"]');
 
     this.bindSplash();
     this.factionButton = this.createFactionButton();
@@ -131,8 +143,10 @@ export class Hud {
 
   configureMode(config: PlayModeConfig): void {
     this.unlimitedDeployment = config.unlimitedDeployment;
+    this.hasDeployments = config.allowedDeployments.length > 0;
     this.factionButton.classList.toggle('hidden', !config.enableFactionCycle);
     this.factionPanel.classList.toggle('compact', !config.enableDiplomacy);
+    this.deployDock.classList.toggle('hidden', !this.hasDeployments);
     for (const [kind, button] of this.deployButtons) {
       const enabled = config.allowedDeployments.includes(kind);
       button.classList.toggle('hidden', !enabled);
@@ -155,7 +169,11 @@ export class Hud {
     this.updateCrosshair();
     this.godControls.classList.toggle('hidden', possessed);
     this.possessionControls.classList.toggle('hidden', !possessed);
-    this.deployDock.classList.toggle('hidden', possessed);
+    this.possessButton.classList.toggle('hidden', possessed);
+    if (possessed) {
+      this.tutorial.classList.add('hidden');
+    }
+    this.deployDock.classList.toggle('hidden', possessed || !this.hasDeployments);
   }
 
   setPointerLocked(locked: boolean): void {
@@ -263,12 +281,13 @@ export class Hud {
   }
 
   setChallengeState(state: ChallengeHudState): void {
-    const minutes = Math.floor(state.session.remainingSeconds / 60);
-    const seconds = Math.ceil(state.session.remainingSeconds % 60);
+    const totalSeconds = Math.ceil(state.session.remainingSeconds);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
     this.challengeTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
     this.challengeScore.textContent = this.challengeFormat === 'triple'
-      ? `${state.session.scores.azure} : ${state.session.scores.crimson} : ${state.session.scores.amber}`
-      : `${state.session.scores.azure} : ${state.session.scores.crimson}`;
+      ? `${state.session.scores.azure} : ${state.session.scores.crimson} : ${state.session.scores.amber} / ${state.session.scoreLimit}`
+      : `${state.session.scores.azure} : ${state.session.scores.crimson} / ${state.session.scoreLimit}`;
     const linkValue = state.session.possessionSeconds > 0
       ? (state.session.possessionSeconds / 15) * 100
       : state.session.linkPercent;
@@ -276,19 +295,52 @@ export class Hud {
     this.linkLabel.textContent = state.session.possessionSeconds > 0
       ? `접속 ${state.session.possessionSeconds.toFixed(1)}초`
       : state.session.linkPercent >= 100
-        ? '빙의 준비 완료'
+        ? '즉시 빙의 가능'
         : `재충전 ${Math.floor(state.session.linkPercent)}%`;
-    this.predictionTarget.textContent = `${state.prediction.read} · ${state.prediction.targetLabel}`;
-    this.predictionConfidence.textContent = `${Math.round(state.prediction.confidence * 100)}%`;
+    this.predictionTarget.textContent = state.prediction.confidence < 0.35
+      ? '적 지휘관이 전선을 분석 중'
+      : `적 대응 · ${state.prediction.read} · ${state.prediction.targetLabel}`;
+    this.predictionConfidence.textContent = state.prediction.confidence < 0.35
+      ? '대기'
+      : `${Math.round(state.prediction.confidence * 100)}%`;
+    this.objectiveStrip.replaceChildren(
+      ...state.objectives.map((objective) => {
+        const chip = document.createElement('div');
+        const ownerClass = objective.owner ?? 'neutral';
+        chip.className = `objective-chip owner-${ownerClass}${
+          objective.contested ? ' contested' : ''
+        }`;
+        const activeFaction = objective.captureFaction ?? objective.owner;
+        const color = activeFaction
+          ? FACTIONS[activeFaction].accent
+          : '#d7e1e8';
+        const stateLabel = objective.contested
+          ? '교전 중'
+          : objective.captureFaction
+            ? `${FACTIONS[objective.captureFaction].name} 점령 중`
+            : objective.owner
+              ? FACTIONS[objective.owner].name
+              : '중립';
+        chip.style.setProperty('--objective-color', color);
+        chip.innerHTML = `
+          <b>${objective.label}</b>
+          <span><i style="width:${objective.capturePercent}%"></i></span>
+          <small>${stateLabel}</small>
+        `;
+        return chip;
+      }),
+    );
   }
 
   showResult(snapshot: ChallengeSessionSnapshot): void {
     const title = snapshot.winner === 'azure'
       ? '작전 성공'
-      : snapshot.winner === 'crimson'
+      : snapshot.winner
         ? '작전 실패'
         : '무승부';
-    const reason = snapshot.finishReason === 'headquarters'
+    const reason = snapshot.finishReason === 'domination'
+      ? `${snapshot.scoreLimit} 지휘 점수 선취`
+      : snapshot.finishReason === 'headquarters'
       ? '적 지휘 본부 파괴'
       : snapshot.finishReason === 'elimination'
         ? '전투 병력 전멸'
@@ -306,7 +358,7 @@ export class Hud {
         <div class="result-stats">
           <span>거점 점령 <b>${snapshot.captures}</b></span>
           <span>격파 <b>${snapshot.kills}</b></span>
-          <span>AI 기만 <b>${snapshot.deceptions}</b></span>
+          <span>전술 기만 <b>${snapshot.deceptions}</b></span>
         </div>
         <button type="button" data-action="retry">다시 도전</button>
         <button type="button" data-action="sandbox">Sandbox로 이동</button>
@@ -363,23 +415,25 @@ export class Hud {
         </div>
       </div>
       <section class="challenge-panel hidden" data-ui="challenge-panel">
-        <div><small>남은 시간</small><strong data-ui="challenge-timer">7:00</strong></div>
+        <div><small>남은 시간</small><strong data-ui="challenge-timer">3:00</strong></div>
         <div><small>${
           this.challengeFormat === 'triple'
             ? '청람 : 적월 : 황토'
-            : '청람 : 적월'
+            : '지휘 점수 · 청람 : 적월'
         }</small><strong data-ui="challenge-score">${
-          this.challengeFormat === 'triple' ? '0 : 0 : 0' : '0 : 0'
+          this.challengeFormat === 'triple' ? '0 : 0 : 0 / 100' : '0 : 0 / 100'
         }</strong></div>
         <div class="command-link">
-          <small data-ui="link-label">빙의 준비 완료</small>
+          <small>DIRECT LINK</small>
+          <strong data-ui="link-label">즉시 빙의 가능</strong>
           <span><i data-ui="link-fill"></i></span>
         </div>
         <div class="ai-read">
-          <small>ADAPTIVE AI READ</small>
-          <strong data-ui="prediction-target">명령 패턴 분석 중</strong>
-          <b data-ui="prediction-confidence">0%</b>
+          <small>ENEMY COMMANDER</small>
+          <strong data-ui="prediction-target">적 지휘관이 전선을 분석 중</strong>
+          <b data-ui="prediction-confidence">대기</b>
         </div>
+        <div class="objective-strip" data-ui="objective-strip"></div>
       </section>
       <section class="faction-panel" data-ui="faction-panel">
         <h2 data-ui="faction-name">청람 연합</h2>
@@ -393,20 +447,22 @@ export class Hud {
           <span>상태</span><strong data-ui="selection-health">-</strong>
         </div>
         <div class="health-bar"><span data-ui="health-bar"></span></div>
-        <button class="possess-button" type="button">선택 유닛 직접 조종 <span>[ENTER]</span></button>
+        <button class="possess-button" data-ui="possess-button" type="button">선택 유닛 직접 조종 <span>[ENTER]</span></button>
       </section>
       <div class="deploy-dock" data-ui="deploy-dock"></div>
       <div class="message-log" data-ui="message-log"></div>
       <div class="crosshair hidden" data-ui="crosshair"></div>
       <div class="tutorial" data-ui="tutorial">
-        <b>1</b> 아군 선택 → <b>우클릭</b>으로 거점 명령<br />
-        <b>2</b> 적 AI의 예측 표식을 확인<br />
-        <b>3</b> 다른 거점으로 틀어 AI를 기만<br />
-        <b>4</b> <b>Enter</b>로 15초 직접 조종
+        <b>1 / 2 / 3</b> 선택 유닛을 A / B / C 거점으로 명령<br />
+        <b>우클릭</b> 원하는 위치로 진격 명령<br />
+        <b>Enter / 더블클릭</b> 즉시 직접 조종<br />
+        거점을 지켜 <b>100점</b>을 먼저 확보
       </div>
       <div class="controls controls-god" data-ui="controls-god">
         <b>마우스</b> 시점 · <b>WASD</b> 이동 · <b>Space/Shift</b> 상승/하강<br />
-        <b>좌클릭</b> 선택/배치 · <b>우클릭</b> 이동/공격 명령 · <b>Enter</b> 빙의
+        ${this.playMode === 'challenge'
+          ? '<b>좌클릭</b> 선택 · <b>1/2/3</b> 거점 명령 · <b>Enter</b> 빙의'
+          : '<b>좌클릭</b> 배치/선택 · <b>우클릭</b> 명령 · <b>1~0</b> 도구 · <b>F</b> 진영'}
       </div>
       <div class="controls controls-possession hidden" data-ui="controls-possession">
         <b>WASD</b> 이동 · <b>마우스</b> 조준 · <b>좌/우클릭</b> 일반/특수 공격<br />
@@ -419,13 +475,13 @@ export class Hud {
           <div class="eyebrow">BLOCKS · BALLISTICS · ADAPTIVE WARFARE</div>
           <h1>PROJECT<br /><span>BRICK WARFARE</span></h1>
           <p>
-            명령 습관을 학습하는 적 지휘 AI를 속이고, 결정적인 15초 동안 병사와 전차에 직접 접속하는
-            레고 전장 하이브리드 RTS입니다.
+            전장을 지휘하고, 가장 결정적인 순간 직접 뛰어드십시오.<br />
+            세 거점을 두고 벌이는 3분짜리 블록 전장 하이브리드 RTS입니다.
           </p>
           <div class="mode-selector">
             <button class="mode-card ${challengeSelected}" type="button" data-mode="challenge">
               <strong>AI CHALLENGE</strong>
-              <span>7분 · 2/3개 진영 선택 · 무제한 God Mode · 적응형 AI</span>
+              <span>3분 · A/B/C 거점전 · 즉시 빙의 · 100점 선취</span>
             </button>
             <button class="mode-card ${sandboxSelected}" type="button" data-mode="sandbox">
               <strong>SANDBOX</strong>
@@ -436,16 +492,16 @@ export class Hud {
             <span>CHALLENGE FORMAT</span>
             <button class="${duelSelected}" type="button" data-format="duel">
               1 VS 1
-              <small>2개 진영 · 시작 거점 각 3개</small>
+              <small>권장 · 압축 전장 · 중립 거점 3개</small>
             </button>
             <button class="${tripleSelected}" type="button" data-format="triple">
               1 VS 1 VS 1
-              <small>3개 진영 · 시작 거점 각 3개</small>
+              <small>확장 전투 · 3개 진영</small>
             </button>
           </div>
           <div class="feature-row">
             <span>GOD ↔ POSSESSION</span>
-            <span>AI PREDICTION & DECEPTION</span>
+            <span>THREE-POINT FRONTLINE</span>
             <span>BRICK DESTRUCTION</span>
             <span>REAL-SCALE CITY</span>
           </div>
@@ -481,10 +537,7 @@ export class Hud {
         }
       });
     }
-    this.require<HTMLButtonElement>('[class="possess-button"]').addEventListener(
-      'click',
-      this.callbacks.onPossess,
-    );
+    this.possessButton.addEventListener('click', this.callbacks.onPossess);
   }
 
   private createFactionButton(): HTMLButtonElement {

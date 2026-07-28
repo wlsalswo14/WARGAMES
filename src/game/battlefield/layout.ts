@@ -6,6 +6,7 @@ export interface OutpostLayout {
   x: number;
   z: number;
   owner: FactionId | null;
+  label?: string;
 }
 
 export const OUTPOST_LAYOUTS: OutpostLayout[] = [

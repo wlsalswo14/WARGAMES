@@ -62,6 +62,7 @@ export class Unit {
     this.stats = UNIT_STATS[kind];
     this.health = this.stats.maxHealth;
     this.model = createUnitModel(kind, faction);
+    this.model.scale.setScalar(1.14);
     this.root.add(this.model);
     this.root.position.copy(position);
     this.previousPosition.copy(position);
@@ -70,7 +71,7 @@ export class Unit {
     this.aimNode = this.model.userData.aimNode as Object3D;
     this.muzzleNode = this.model.userData.muzzleNode as Object3D;
 
-    const radius = this.collisionRadius * 1.2;
+    const radius = this.collisionRadius * 1.42;
     this.selectionRing = new Mesh(
       new RingGeometry(radius * 0.78, radius, 32),
       new MeshBasicMaterial({
@@ -87,7 +88,11 @@ export class Unit {
     this.root.add(this.selectionRing);
 
     this.factionMarker = new Mesh(
-      new ConeGeometry(this.kind === 'infantry' ? 0.42 : 0.65, this.kind === 'infantry' ? 0.8 : 1.15, 8),
+      new ConeGeometry(
+        this.kind === 'infantry' ? 0.62 : 0.88,
+        this.kind === 'infantry' ? 1.05 : 1.42,
+        8,
+      ),
       new MeshBasicMaterial({
         color: FACTIONS[faction].color,
         transparent: true,
@@ -97,10 +102,10 @@ export class Unit {
     );
     this.factionMarker.rotation.x = Math.PI;
     this.factionMarker.position.y = this.kind === 'infantry'
-      ? 3.8
+      ? 4.2
       : this.kind === 'tank'
-        ? 4.8
-        : 3.4;
+        ? 5.3
+        : 4;
     this.factionMarker.renderOrder = 20;
     this.root.add(this.factionMarker);
   }

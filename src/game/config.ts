@@ -182,5 +182,5 @@ export const WORLD = {
   resourceTick: 2,
   diplomacyInterval: 45,
   maxProjectiles: 110,
-  maxRubble: 90,
+  maxRubble: 48,
 } as const;

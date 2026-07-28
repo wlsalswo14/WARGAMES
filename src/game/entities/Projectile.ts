@@ -13,7 +13,7 @@ import type { Unit } from './Unit';
 
 let nextProjectileId = 1;
 
-const normalProjectileGeometry = new SphereGeometry(0.13, 7, 5);
+const normalProjectileGeometry = new SphereGeometry(0.2, 7, 5);
 const specialProjectileGeometry = new SphereGeometry(0.48, 9, 6);
 const bulletMaterial = new MeshBasicMaterial({ color: 0xfff2b8 });
 const tankShellMaterial = new MeshBasicMaterial({ color: 0xff7a32 });
@@ -69,7 +69,7 @@ export class Projectile {
           : 2.8;
       this.mesh.scale.set(0.82, 0.82, length);
     } else {
-      this.mesh.scale.z = 4.2;
+      this.mesh.scale.z = 5.4;
     }
     this.mesh.position.copy(position);
     this.velocity = direction.normalize().multiplyScalar(weapon.projectileSpeed);

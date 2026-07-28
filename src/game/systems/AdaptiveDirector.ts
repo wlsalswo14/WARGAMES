@@ -94,9 +94,9 @@ export class AdaptiveDirector {
 
   private recalculatePrediction(outposts: Outpost[]): void {
     const ranked = outposts
-      .map((outpost, index) => ({
+      .map((outpost) => ({
         id: outpost.id,
-        label: `거점 ${index + 1}`,
+        label: `거점 ${outpost.label}`,
         weight: this.targetWeights.get(outpost.id) ?? 1,
         owner: outpost.owner,
       }))

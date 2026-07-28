@@ -1,11 +1,15 @@
 import {
+  CanvasTexture,
   CircleGeometry,
   CylinderGeometry,
   Group,
+  LinearFilter,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   RingGeometry,
+  Sprite,
+  SpriteMaterial,
 } from 'three';
 import { FACTIONS, WORLD } from '../config';
 import type { FactionId } from '../types';
@@ -16,6 +20,7 @@ let nextOutpostId = 1;
 export class Outpost {
   readonly id = `outpost-${nextOutpostId++}`;
   readonly root = new Group();
+  readonly label: string;
   owner: FactionId | null;
   captureFaction: FactionId | null = null;
   captureProgress = 0;
@@ -24,8 +29,9 @@ export class Outpost {
   private readonly territory: Mesh<CircleGeometry, MeshBasicMaterial>;
   private readonly beacon: Mesh<CylinderGeometry, MeshStandardMaterial>;
 
-  constructor(owner: FactionId | null) {
+  constructor(owner: FactionId | null, label = '?') {
     this.owner = owner;
+    this.label = label;
     this.ring = new Mesh(
       new RingGeometry(WORLD.outpostCaptureRadius - 0.7, WORLD.outpostCaptureRadius, 48),
       new MeshBasicMaterial({
@@ -74,6 +80,11 @@ export class Outpost {
     this.beacon.position.y = 4.6;
     this.beacon.castShadow = true;
     this.root.add(this.beacon);
+
+    const marker = createObjectiveMarker(label);
+    marker.position.y = 13;
+    marker.renderOrder = 4;
+    this.root.add(marker);
   }
 
   update(delta: number, units: Unit[]): FactionId | null {
@@ -142,4 +153,37 @@ export class Outpost {
     this.territory.material.color.set(this.owner ? FACTIONS[this.owner].color : 0xb9c2c8);
     this.territory.material.opacity = this.owner ? 0.2 : 0.08;
   }
+}
+
+function createObjectiveMarker(label: string): Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Objective marker canvas is unavailable');
+  }
+  context.fillStyle = 'rgba(4, 12, 22, 0.88)';
+  context.strokeStyle = '#d9f2ff';
+  context.lineWidth = 6;
+  context.beginPath();
+  context.roundRect(46, 18, 164, 92, 18);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#ffffff';
+  context.font = '900 66px Arial';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(label, 128, 66);
+  const texture = new CanvasTexture(canvas);
+  texture.minFilter = LinearFilter;
+  const material = new SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const marker = new Sprite(material);
+  marker.scale.set(8, 4, 1);
+  return marker;
 }

@@ -27,7 +27,7 @@ export class BrickBurstSystem {
   private readonly scratchBox = new Box3();
   private readonly scratchSize = new Vector3();
   private readonly scratchCenter = new Vector3();
-  private readonly maxFragments = 140;
+  private readonly maxFragments = 104;
 
   constructor(scene: Scene) {
     this.scene = scene;

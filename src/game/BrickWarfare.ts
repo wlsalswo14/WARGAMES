@@ -60,6 +60,7 @@ import {
   type PlayMode,
 } from './modes/PlayMode';
 import { AdaptiveDirector } from './systems/AdaptiveDirector';
+import { BattleAudio } from './systems/BattleAudio';
 import { BattlefieldAI } from './systems/BattlefieldAI';
 import { BrickBurstSystem } from './systems/BrickBurstSystem';
 import { ChallengeSession } from './systems/ChallengeSession';
@@ -100,6 +101,7 @@ export class BrickWarfare {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly playMode = getRequestedPlayMode();
+  private readonly testMode = new URLSearchParams(window.location.search).has('test');
   private readonly challengeFormat = getRequestedChallengeFormat();
   private readonly modeConfig = PLAY_MODE_CONFIGS[this.playMode];
   private readonly activeFactions = this.playMode === 'challenge'
@@ -130,14 +132,16 @@ export class BrickWarfare {
   private readonly input: GameInput;
   private readonly diplomacy = new DiplomacySystem();
   private readonly brickBursts = new BrickBurstSystem(this.scene);
+  private readonly audio = new BattleAudio();
   private readonly combat: CombatSystem;
   private readonly ai: BattlefieldAI;
   private readonly hud: Hud;
   private readonly challengeSession = this.playMode === 'challenge'
     ? new ChallengeSession({
-        duration: this.modeConfig.matchDuration ?? 420,
-        possessionDuration: this.modeConfig.possessionDuration ?? 15,
+        duration: this.testMode ? 45 : (this.modeConfig.matchDuration ?? 180),
+        possessionDuration: this.modeConfig.possessionDuration,
         possessionRecharge: this.modeConfig.possessionRecharge,
+        scoreLimit: this.testMode ? 20 : 100,
         activeFactions: this.activeFactions,
       })
     : null;
@@ -183,10 +187,13 @@ export class BrickWarfare {
     this.shell.className = 'game-shell';
     container.append(this.shell);
 
-    this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new WebGLRenderer({
+      antialias: this.playMode === 'sandbox',
+      powerPreference: 'high-performance',
+    });
     this.renderer.domElement.className = 'game-canvas';
     this.renderer.domElement.tabIndex = 0;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = this.playMode === 'sandbox';
     this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
@@ -208,27 +215,32 @@ export class BrickWarfare {
       this.challengeFormat,
       {
         onStart: () => {
+          this.audio.resume();
           this.simulationRunning = true;
           this.challengeSession?.start();
+          if (this.playMode === 'challenge') {
+            const commandUnit = this.units.find(
+              (unit) => unit.faction === this.activeFaction && unit.kind === 'tank',
+            ) ?? this.units.find((unit) => unit.faction === this.activeFaction);
+            if (commandUnit) {
+              this.selectUnit(commandUnit);
+            }
+          }
           this.clock.getDelta();
           this.input.lockPointer();
-          this.hud.notify(
-            `전장 전개 · ${this.battlefieldTheme.label}`,
-            this.battlefieldTheme.description,
-            '#8ed8ff',
-          );
           if (this.playMode === 'challenge') {
+            const scoreLimit = this.challengeSession?.snapshot().scoreLimit ?? 100;
             this.hud.notify(
-              '작전 목표',
-              '7분 동안 거점 점수에서 앞서거나 적 지휘 본부를 파괴하십시오.',
+              `작전 개시 · ${this.battlefieldTheme.label}`,
+              `A·B·C 확보 → ${scoreLimit}점 선취 · 1/2/3 명령 · Enter 직접 조종`,
               '#ffcf5d',
             );
-            this.hud.notify(
-              '적응형 지휘 AI',
-              '우클릭 명령 패턴을 예측합니다. 표적을 바꿔 예측을 속이면 추가 점수를 얻습니다.',
-              '#ff7b63',
-            );
           } else {
+            this.hud.notify(
+              `전장 전개 · ${this.battlefieldTheme.label}`,
+              this.battlefieldTheme.description,
+              '#8ed8ff',
+            );
             this.hud.notify(
               'Sandbox 연결',
               '모든 진영과 지형 도구를 무제한으로 사용할 수 있습니다.',
@@ -309,7 +321,7 @@ export class BrickWarfare {
     this.scene.add(new AmbientLight(0x8aa0a8, 0.38));
     const sun = new DirectionalLight(0xfff0d4, 3.1);
     sun.position.set(-170, 240, 95);
-    sun.castShadow = true;
+    sun.castShadow = this.playMode === 'sandbox';
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -330;
     sun.shadow.camera.right = 330;
@@ -337,13 +349,16 @@ export class BrickWarfare {
       ? this.challengeLayout.staging
       : STAGING_SPAWN_LAYOUTS;
 
-    for (const layout of outpostLayouts) {
+    for (const [index, layout] of outpostLayouts.entries()) {
       const position = new Vector3(
         layout.x,
         terrainHeight(layout.x, layout.z),
         layout.z,
       );
-      const outpost = new Outpost(layout.owner);
+      const outpost = new Outpost(
+        layout.owner,
+        layout.label ?? `${index + 1}`,
+      );
       outpost.root.position.copy(position);
       this.outposts.push(outpost);
       this.scene.add(outpost.root);
@@ -453,11 +468,13 @@ export class BrickWarfare {
   }
 
   private frame(): void {
-    const delta = Math.min(0.05, this.clock.getDelta());
+    const wallDelta = Math.min(0.5, this.clock.getDelta());
+    const maximumSimulationDelta = this.playMode === 'challenge' ? 0.1 : 0.05;
+    const delta = Math.min(maximumSimulationDelta, wallDelta);
     this.elapsed += delta;
     if (this.simulationRunning) {
       const simulationDelta = this.killCamera ? delta * 0.24 : delta;
-      this.updateSimulation(simulationDelta);
+      this.updateSimulation(simulationDelta, wallDelta);
       this.updateKillCamera(delta);
     }
     this.updateCamera(delta);
@@ -467,10 +484,15 @@ export class BrickWarfare {
         : this.godPosition,
     );
     this.updateHud(delta);
+    this.audio.update(
+      wallDelta,
+      this.simulationRunning,
+      this.mode === 'possession' || this.combat.projectiles.length >= 6,
+    );
     this.renderer.render(this.scene, this.camera);
   }
 
-  private updateSimulation(delta: number): void {
+  private updateSimulation(delta: number, challengeDelta: number): void {
     for (const unit of this.units) {
       if (!unit.destroyed) {
         unit.beginSimulationStep();
@@ -483,7 +505,7 @@ export class BrickWarfare {
     }
 
     this.aiAccumulator += delta;
-    const aiInterval = this.playMode === 'challenge' ? 1 / 20 : 1 / 30;
+    const aiInterval = this.playMode === 'challenge' ? 1 / 15 : 1 / 20;
     if (this.aiAccumulator >= aiInterval) {
       const aiDelta = Math.min(this.aiAccumulator, 0.1);
       this.aiAccumulator = 0;
@@ -497,8 +519,11 @@ export class BrickWarfare {
         (unit, target, mode) => {
           if (mode === 'suicide') {
             this.combat.detonateDrone(unit, this.units, this.structures);
-          } else {
-            this.combat.fire(unit, target, mode);
+          } else if (
+            this.combat.fire(unit, target, mode)
+            && unit.position.distanceToSquared(this.camera.position) <= 180 * 180
+          ) {
+            this.audio.fire(unit.kind, mode);
           }
         },
       );
@@ -549,7 +574,7 @@ export class BrickWarfare {
       this.unitCleanupTimer = 2;
       this.cleanupDestroyedUnits();
     }
-    this.updateChallenge(delta);
+    this.updateChallenge(challengeDelta);
 
     if (this.possessedUnit?.destroyed && !this.killCamera) {
       this.hud.notify(
@@ -587,6 +612,7 @@ export class BrickWarfare {
     if (
       this.mode === 'possession'
       && this.possessedUnit
+      && this.modeConfig.possessionDuration !== null
       && snapshot.possessionSeconds <= 0
     ) {
       this.hud.notify(
@@ -600,6 +626,7 @@ export class BrickWarfare {
       this.challengeResultShown = true;
       this.simulationRunning = false;
       this.input.unlockPointer();
+      this.audio.result(snapshot.winner === this.activeFaction);
       this.hud.showResult(snapshot);
     }
   }
@@ -620,7 +647,7 @@ export class BrickWarfare {
 
   private updateGodControls(delta: number): void {
     const forwardInput = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
-    const sideInput = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
+    const sideInput = this.inputAxis(RIGHT_KEYS, LEFT_KEYS);
     const verticalInput = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     const rotateInput = Number(this.input.isDown('KeyE')) - Number(this.input.isDown('KeyQ'));
@@ -647,7 +674,7 @@ export class BrickWarfare {
       return;
     }
     const forward = this.inputAxis(FORWARD_KEYS, BACKWARD_KEYS);
-    const side = this.inputAxis(LEFT_KEYS, RIGHT_KEYS);
+    const side = this.inputAxis(RIGHT_KEYS, LEFT_KEYS);
     const up = Number(this.input.isDown('Space'))
       - Number(this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
     unit.movePossessed(forward, side, up, this.aimYaw, delta, this.world.wind);
@@ -871,9 +898,10 @@ export class BrickWarfare {
       if (capturedBy) {
         this.world.setTerritories(this.outposts);
         this.challengeSession?.recordCapture(capturedBy);
+        this.audio.capture(capturedBy);
         this.hud.notify(
-          '거점 점령 완료',
-          `${FACTIONS[capturedBy].name}이 ${outpost.id.toUpperCase()}의 보급망을 확보했습니다.`,
+          `${outpost.label} 거점 점령`,
+          `${FACTIONS[capturedBy].name}이 전선을 확보했습니다. +8점`,
           FACTIONS[capturedBy].accent,
         );
       }
@@ -931,7 +959,11 @@ export class BrickWarfare {
     const spawnCount = Math.min(missing, ownedOutposts.length);
     let spawnedCount = 0;
     for (let index = 0; index < spawnCount; index += 1) {
-      const kind = chooseReinforcementKind(strategy);
+      const requestedKind = chooseReinforcementKind(strategy);
+      const kind = this.playMode === 'challenge'
+        && (requestedKind === 'fighter' || requestedKind === 'helicopter')
+        ? 'drone'
+        : requestedKind;
       const reinforcementCost = this.modeConfig.deploymentCosts[kind] ?? 0;
       const balance = this.resources.get(faction) ?? 0;
       if (!this.modeConfig.unlimitedDeployment && balance < reinforcementCost) {
@@ -1144,6 +1176,16 @@ export class BrickWarfare {
       this.hud.setChallengeState({
         session: this.challengeSession.snapshot(),
         prediction: this.adaptiveDirector.getPrediction(),
+        objectives: this.outposts.map((outpost) => ({
+          label: outpost.label,
+          owner: outpost.owner,
+          captureFaction: outpost.captureFaction,
+          capturePercent: Math.min(
+            100,
+            (outpost.captureProgress / WORLD.outpostCaptureTime) * 100,
+          ),
+          contested: outpost.contested,
+        })),
       });
     }
     this.hud.setSelection(this.possessedUnit ?? this.selectedUnit);
@@ -1159,6 +1201,14 @@ export class BrickWarfare {
       this.hud.notify('시점 전환', this.cameraView === 'firstPerson' ? '1인칭 조종 시점' : '3인칭 추적 시점');
     } else if (event.code === 'Enter' && this.mode === 'god' && this.selectedUnit && !this.selectedUnit.destroyed) {
       this.enterPossession(this.selectedUnit);
+    } else if (
+      this.playMode === 'challenge'
+      && this.mode === 'god'
+      && ['Digit1', 'Digit2', 'Digit3'].includes(event.code)
+    ) {
+      const objectiveIndex = Number.parseInt(event.code.slice(-1), 10) - 1;
+      this.commandSelectedToOutpost(objectiveIndex);
+      event.preventDefault();
     } else if (this.mode === 'god' && event.code.startsWith('Digit')) {
       const hotkeys: DeployKind[] = [
         'tree',
@@ -1182,11 +1232,11 @@ export class BrickWarfare {
 
   private handleMouseLook(movementX: number, movementY: number): void {
     if (this.mode === 'possession') {
-      this.aimYaw -= movementX * 0.0023;
+      this.aimYaw += movementX * 0.0023;
       this.aimPitch = clamp(this.aimPitch - movementY * 0.0019, -1.1, 0.78);
       return;
     }
-    this.godAzimuth -= movementX * 0.0023;
+    this.godAzimuth += movementX * 0.0023;
     this.godPitch = clamp(this.godPitch - movementY * 0.0019, -1.3, 1.1);
   }
 
@@ -1234,11 +1284,14 @@ export class BrickWarfare {
           return;
         }
         const target = this.getCrosshairAimPoint();
-        this.combat.fire(
+        const attackMode = event.button === 2 ? 'special' : 'normal';
+        if (this.combat.fire(
           this.possessedUnit,
           target,
-          event.button === 2 ? 'special' : 'normal',
-        );
+          attackMode,
+        )) {
+          this.audio.fire(this.possessedUnit.kind, attackMode);
+        }
       }
       return;
     }
@@ -1316,8 +1369,8 @@ export class BrickWarfare {
       if (observation.deceptionTriggered) {
         this.challengeSession?.recordDeception();
         this.hud.notify(
-          'AI 예측 기만 성공',
-          '적 예비대가 잘못된 거점으로 이동했습니다. +120점',
+          '전술 기만 성공',
+          '적 예비대가 잘못된 거점으로 이동했습니다. +5점',
           '#70e1a1',
         );
       }
@@ -1327,6 +1380,52 @@ export class BrickWarfare {
       `${this.selectedUnit.displayName}: ${targetUnit ? '표적 교전' : '지정 위치로 이동'}`,
       FACTIONS[this.selectedUnit.faction].accent,
     );
+    this.audio.command();
+  }
+
+  private commandSelectedToOutpost(index: number): void {
+    const outpost = this.outposts[index];
+    if (!outpost) {
+      return;
+    }
+    if (!this.selectedUnit || this.selectedUnit.destroyed) {
+      const fallback = this.units.find(
+        (unit) => unit.faction === this.activeFaction && !unit.destroyed,
+      );
+      if (!fallback) {
+        return;
+      }
+      this.selectUnit(fallback);
+    }
+    const unit = this.selectedUnit;
+    if (!unit || unit.faction !== this.activeFaction) {
+      return;
+    }
+    unit.order = {
+      type: 'move',
+      destination: outpost.root.position.clone(),
+    };
+    if (this.adaptiveDirector) {
+      const observation = this.adaptiveDirector.observeCommand(
+        unit.kind,
+        outpost,
+        this.outposts,
+      );
+      if (observation.deceptionTriggered) {
+        this.challengeSession?.recordDeception();
+        this.hud.notify(
+          '전술 기만 성공',
+          '적 예비대가 잘못된 거점으로 이동했습니다. +5점',
+          '#70e1a1',
+        );
+      }
+    }
+    this.hud.notify(
+      `${outpost.label} 거점 진격`,
+      `${unit.displayName}에 점령 명령을 전송했습니다. Enter로 직접 조종할 수 있습니다.`,
+      FACTIONS[unit.faction].accent,
+    );
+    this.audio.command();
   }
 
   private findClosestOutpost(point: Vector3, maximumDistance: number): Outpost | null {
@@ -1416,6 +1515,7 @@ export class BrickWarfare {
     unit.setPossessed(true);
     unit.order = null;
     this.mode = 'possession';
+    this.audio.link(true);
     this.cameraView = 'thirdPerson';
     this.aimYaw = unit.yaw;
     this.aimPitch = -0.07;
@@ -1442,6 +1542,7 @@ export class BrickWarfare {
       this.challengeSession?.endPossession();
     }
     this.mode = 'god';
+    this.audio.link(false);
     this.hud.setMode(this.mode);
     this.input.unlockPointer();
   }
@@ -1653,6 +1754,7 @@ export class BrickWarfare {
   }
 
   private onWorldExplosion(position: Vector3, radius: number): void {
+    this.audio.explosion(radius);
     const trees = this.world.destroyTrees(position, Math.max(4, radius * 1.25));
     for (const tree of trees) {
       this.brickBursts.burstAt(
@@ -1692,7 +1794,10 @@ export class BrickWarfare {
     const height = this.shell.clientHeight;
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    const maximumPixelRatio = this.softwareRendering
+      ? (this.playMode === 'challenge' ? 0.68 : 0.82)
+      : (this.playMode === 'challenge' ? 1 : 1.25);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maximumPixelRatio));
     this.renderer.setSize(width, height, false);
   }
 
