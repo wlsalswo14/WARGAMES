@@ -138,12 +138,15 @@ src/
 
 브라우저 하드웨어 가속을 켜면 GPU로 WebGL을 렌더링합니다. 하드웨어 가속이 꺼진 환경에서는 경고와 함께 저해상도 안전 모드를 적용합니다.
 
-## 제출 문서
+## 제출물
 
-- [게임 소개 및 설명](docs/GAME_GUIDE.md)
-- [AI 활용 기술 문서](docs/AI_TECHNICAL_DOCUMENT.md)
+- [게임 소개 및 설명 PDF](submission/PROJECT_BRICK_WARFARE_GAME_GUIDE.pdf)
+- [AI 활용 기술 문서 PDF](submission/PROJECT_BRICK_WARFARE_AI_TECHNICAL_DOCUMENT.pdf)
+- [30.52초 실제 플레이 영상](submission/PROJECT_BRICK_WARFARE_GAMEPLAY_31S.webm)
+- [게임 설명 원문](docs/GAME_GUIDE.md)
+- [AI 기술 문서 원문](docs/AI_TECHNICAL_DOCUMENT.md)
 - [제출 체크리스트](docs/SUBMISSION_CHECKLIST.md)
-- [플레이 영상 촬영 가이드](docs/VIDEO_SHOTLIST.md)
+- [YouTube 업로드 정보](submission/YOUTUBE_UPLOAD.md)
 
 ## 오픈소스 및 권리
 
