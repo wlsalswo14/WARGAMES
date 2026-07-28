@@ -14,15 +14,15 @@
 
 ## 2. 플레이 동영상
 
-- [x] 42.88초 실제 플레이 화면 녹화
-- [x] God Mode → 거점 명령 → 직접 조종 → 특수공격 장면 포함
+- [x] 30.52초 실제 플레이 화면 녹화
+- [x] God Mode → 거점 명령 → 직접 조종 → 특수공격 → 점령·점수 변화 포함
 - [x] 편집으로 생성한 가짜 플레이 장면 없음
 - [ ] YouTube 공개 또는 일부 공개 업로드
 - [ ] 아래 링크 입력
 
 YouTube: `제출 전 입력`
 
-업로드 파일: `submission/PROJECT_BRICK_WARFARE_GAMEPLAY_42S.webm`
+업로드 파일: `submission/PROJECT_BRICK_WARFARE_GAMEPLAY_31S.webm`
 
 ## 3. 게임 소개 및 설명 PDF
 
