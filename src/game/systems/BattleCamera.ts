@@ -78,7 +78,7 @@ export class BattleCamera {
     movementY: number,
   ): void {
     if (mode === 'possession') {
-      this.aimYaw += movementX * MOUSE_YAW_SENSITIVITY;
+      this.aimYaw -= movementX * MOUSE_YAW_SENSITIVITY;
       this.aimPitch = clamp(
         this.aimPitch - movementY * MOUSE_PITCH_SENSITIVITY,
         -1.1,
@@ -86,7 +86,7 @@ export class BattleCamera {
       );
       return;
     }
-    this.godAzimuth += movementX * MOUSE_YAW_SENSITIVITY;
+    this.godAzimuth -= movementX * MOUSE_YAW_SENSITIVITY;
     this.godPitch = clamp(
       this.godPitch - movementY * MOUSE_PITCH_SENSITIVITY,
       -1.3,
