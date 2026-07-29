@@ -22,6 +22,13 @@ import type {
 import { createUnitModel } from './BrickFactory';
 
 let nextUnitId = 1;
+const FIGHTER_AI_PITCH_LIMIT = 0.52;
+const FIGHTER_AI_PITCH_RATE = 0.72;
+const FIGHTER_PLAYER_PITCH_RATE = 1.25;
+
+function normalizeRadians(angle: number): number {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
 
 export class Unit {
   readonly id = `unit-${nextUnitId++}`;
@@ -133,6 +140,18 @@ export class Unit {
     return this.kind === 'fighter' || this.kind === 'helicopter' || this.kind === 'drone';
   }
 
+  getForwardDirection(): Vector3 {
+    if (this.kind !== 'fighter') {
+      return flatForward(this.yaw);
+    }
+    const horizontalScale = Math.cos(this.pitch);
+    return new Vector3(
+      Math.sin(this.yaw) * horizontalScale,
+      -Math.sin(this.pitch),
+      Math.cos(this.yaw) * horizontalScale,
+    ).normalize();
+  }
+
   beginSimulationStep(): void {
     this.previousPosition.copy(this.position);
   }
@@ -193,7 +212,7 @@ export class Unit {
       return;
     }
 
-    this.root.rotation.set(this.pitch, this.yaw, this.roll, 'YXZ');
+    this.model.rotation.set(this.pitch, this.yaw, this.roll, 'YXZ');
     this.updateAnimatedParts(delta, elapsed);
 
     if (!this.isAircraft) {
@@ -237,17 +256,33 @@ export class Unit {
     if (this.kind === 'fighter') {
       this.throttle = clamp(this.throttle + forwardInput * delta * 0.36, 0.28, 1);
       this.yaw += turnInput * this.stats.turnRate * delta;
-      this.pitch = clamp(this.pitch + verticalInput * delta * 0.72, -0.52, 0.52);
+      if (this.possessed) {
+        this.pitch = normalizeRadians(
+          this.pitch + verticalInput * delta * FIGHTER_PLAYER_PITCH_RATE,
+        );
+      } else {
+        this.pitch = clamp(
+          this.pitch + verticalInput * delta * FIGHTER_AI_PITCH_RATE,
+          -FIGHTER_AI_PITCH_LIMIT,
+          FIGHTER_AI_PITCH_LIMIT,
+        );
+      }
       const speed = this.stats.speed * this.throttle;
       const lift = Math.max(0, speed - 22) * 0.045;
-      const stall = speed < 29 || Math.abs(this.pitch) > 0.45;
-      this.altitudeVelocity += ((stall ? -9 : lift + Math.sin(-this.pitch) * speed * 0.08) - 1.8) * delta;
+      const stall = speed < 29 || (!this.possessed && Math.abs(this.pitch) > 0.45);
+      const verticalAcceleration = this.possessed
+        ? stall ? -8 : -0.65
+        : (stall ? -9 : lift + Math.sin(-this.pitch) * speed * 0.08) - 1.8;
+      this.altitudeVelocity += verticalAcceleration * delta;
       this.altitudeVelocity *= Math.pow(0.35, delta);
       this.roll = MathUtils.damp(this.roll, -turnInput * 0.75, 2.6, delta);
-      const direction = flatForward(this.yaw);
-      direction.y = -Math.sin(this.pitch);
-      direction.normalize();
-      this.velocity.copy(direction).multiplyScalar(speed).addScaledVector(wind, 0.1);
+      const direction = this.possessed
+        ? this.getForwardDirection()
+        : flatForward(this.yaw).setY(-Math.sin(this.pitch)).normalize();
+      this.velocity
+        .copy(direction)
+        .multiplyScalar(speed)
+        .addScaledVector(wind, 0.1);
       this.velocity.y += this.altitudeVelocity;
     } else {
       this.throttle = MathUtils.damp(this.throttle, forwardInput, 3.2, delta);

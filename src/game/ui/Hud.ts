@@ -466,7 +466,7 @@ export class Hud {
       </div>
       <div class="controls controls-possession hidden" data-ui="controls-possession">
         <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>마우스</b> 이동 방향으로 조준 · <b>좌/우클릭 유지</b> 일반/특수 공격<br />
-        <b>Space/Shift</b> 상승/하강 · <b>V</b> 시점 · <b>G/Esc</b> 관찰자 복귀
+        <b>Space/Shift</b> 상승/하강 (전투기: 기수 올림/내림·루프) · <b>V</b> 시점 · <b>G/Esc</b> 관찰자 복귀
       </div>
       <div class="damage-vignette" data-ui="damage-vignette"></div>
       <div class="result-overlay hidden" data-ui="result-overlay"></div>

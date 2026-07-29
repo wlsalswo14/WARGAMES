@@ -191,10 +191,13 @@ export class BattleCamera {
       unit.kind === 'infantry' ? 2 : unit.isAircraft ? 1.8 : 2.9,
       0,
     ));
+    const viewPitch = unit.kind === 'fighter'
+      ? -unit.pitch + this.aimPitch
+      : this.aimPitch;
     const aimDirection = new Vector3(
-      Math.sin(this.aimYaw) * Math.cos(this.aimPitch),
-      Math.sin(this.aimPitch),
-      Math.cos(this.aimYaw) * Math.cos(this.aimPitch),
+      Math.sin(this.aimYaw) * Math.cos(viewPitch),
+      Math.sin(viewPitch),
+      Math.cos(this.aimYaw) * Math.cos(viewPitch),
     ).normalize();
     if (this.cameraView === 'firstPerson') {
       const desired = anchor.clone().addScaledVector(aimDirection, 0.85);
