@@ -24,6 +24,7 @@ const CONTROL_KEYS = new Set([
 
 export class GameInput {
   private readonly keys = new Set<string>();
+  private readonly mouseButtons = new Set<number>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -32,6 +33,7 @@ export class GameInput {
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('mouseup', this.handleMouseUp);
     window.addEventListener('blur', this.handleBlur);
     document.addEventListener('pointerlockchange', this.handlePointerLockChange);
     document.addEventListener('mousemove', this.handleMouseMove);
@@ -43,6 +45,10 @@ export class GameInput {
 
   isDown(code: string): boolean {
     return this.keys.has(code);
+  }
+
+  isMouseDown(button: number): boolean {
+    return this.mouseButtons.has(button);
   }
 
   get pointerLocked(): boolean {
@@ -65,6 +71,7 @@ export class GameInput {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('mouseup', this.handleMouseUp);
     window.removeEventListener('blur', this.handleBlur);
     document.removeEventListener('pointerlockchange', this.handlePointerLockChange);
     document.removeEventListener('mousemove', this.handleMouseMove);
@@ -95,9 +102,13 @@ export class GameInput {
 
   private readonly handleBlur = (): void => {
     this.keys.clear();
+    this.mouseButtons.clear();
   };
 
   private readonly handlePointerLockChange = (): void => {
+    if (!this.pointerLocked) {
+      this.mouseButtons.clear();
+    }
     this.callbacks.onPointerLockChange(this.pointerLocked);
   };
 
@@ -117,7 +128,12 @@ export class GameInput {
   };
 
   private readonly handleMouseDown = (event: MouseEvent): void => {
+    this.mouseButtons.add(event.button);
     this.callbacks.onMouseDown(event);
+  };
+
+  private readonly handleMouseUp = (event: MouseEvent): void => {
+    this.mouseButtons.delete(event.button);
   };
 
   private readonly handleDoubleClick = (event: MouseEvent): void => {

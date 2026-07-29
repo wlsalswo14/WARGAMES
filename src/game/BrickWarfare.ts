@@ -18,9 +18,7 @@ import {
 } from 'three';
 import { chooseReinforcementKind } from './battlefield/forces';
 import {
-  CHALLENGE_STRUCTURES,
-  CHALLENGE_THEME,
-  getChallengeLayout,
+  getChallengeBattlefield,
 } from './battlefield/challengeLayout';
 import {
   BASE_LAYOUTS,
@@ -30,6 +28,7 @@ import {
 } from './battlefield/layout';
 import {
   initialSpawnPosition,
+  reinforcementBaseAnchor,
   reinforcementSpawnPosition,
 } from './battlefield/spawnZones';
 import {
@@ -99,9 +98,13 @@ export class BrickWarfare {
   private readonly activeFactions = this.playMode === 'challenge'
     ? getChallengeFactions(this.challengeFormat)
     : this.modeConfig.activeFactions;
-  private readonly challengeLayout = getChallengeLayout(this.challengeFormat);
+  private readonly challengeBattlefield = getChallengeBattlefield(
+    this.challengeFormat,
+    new URLSearchParams(window.location.search).get('map'),
+  );
+  private readonly challengeLayout = this.challengeBattlefield.layout;
   private readonly battlefieldTheme = this.playMode === 'challenge'
-    ? CHALLENGE_THEME
+    ? this.challengeBattlefield.theme
     : createRandomBattlefieldTheme();
   private readonly world = new BattlefieldWorld(
     this.battlefieldTheme.palette,
@@ -406,7 +409,7 @@ export class BrickWarfare {
     }
 
     const structurePlans = this.playMode === 'challenge'
-      ? CHALLENGE_STRUCTURES
+      ? this.challengeBattlefield.structures
       : this.createSandboxStructurePlans();
     for (const plan of structurePlans) {
       const structure = createStructureFromPlan(plan);
@@ -682,6 +685,7 @@ export class BrickWarfare {
       delta,
       this.world.wind,
     );
+    this.updatePossessedFire();
   }
 
   private inputAxis(
@@ -751,26 +755,34 @@ export class BrickWarfare {
     }
     const sequence = this.reinforcementSequence.get(faction) ?? 0;
     const ownedOutposts = this.outposts.filter((outpost) => outpost.owner === faction);
-    if (ownedOutposts.length === 0) {
+    const headquarters = this.headquarters.get(faction);
+    const baseLayouts = this.playMode === 'challenge'
+      ? this.challengeLayout.bases
+      : BASE_LAYOUTS;
+    const spawnAnchors = [
+      ...(
+        headquarters && !headquarters.destroyed
+          ? [reinforcementBaseAnchor(baseLayouts[faction])]
+          : []
+      ),
+      ...ownedOutposts.map((outpost) => outpost.root.position),
+    ];
+    if (spawnAnchors.length === 0) {
       return;
     }
     const strategy = this.ai.getStrategy(faction);
     const missing = this.modeConfig.targetUnitsPerFaction - alive;
-    const spawnCount = Math.min(missing, ownedOutposts.length);
+    const spawnCount = Math.min(missing, spawnAnchors.length, 2);
     let spawnedCount = 0;
     for (let index = 0; index < spawnCount; index += 1) {
-      const requestedKind = chooseReinforcementKind(strategy);
-      const kind = this.playMode === 'challenge'
-        && (requestedKind === 'fighter' || requestedKind === 'helicopter')
-        ? 'drone'
-        : requestedKind;
+      const kind = chooseReinforcementKind(strategy);
       const reinforcementCost = this.modeConfig.deploymentCosts[kind] ?? 0;
       const balance = this.resources.get(faction) ?? 0;
       if (!this.modeConfig.unlimitedDeployment && balance < reinforcementCost) {
         break;
       }
       const nextSequence = sequence + index;
-      const spawnAnchor = ownedOutposts[nextSequence % ownedOutposts.length].root.position;
+      const spawnAnchor = spawnAnchors[nextSequence % spawnAnchors.length];
       const spawn = reinforcementSpawnPosition(spawnAnchor, nextSequence);
       this.spawnUnit(kind, faction, spawn);
       spawnedCount += 1;
@@ -1074,27 +1086,8 @@ export class BrickWarfare {
       this.input.lockPointer();
     }
     if (this.mode === 'possession') {
-      if ((event.button === 0 || event.button === 2) && this.possessedUnit) {
-        if (event.button === 2 && this.possessedUnit.kind === 'drone') {
-          this.combat.detonateDrone(
-            this.possessedUnit,
-            this.units,
-            this.structures,
-          );
-          return;
-        }
-        if (event.button === 2 && this.possessedUnit.kind === 'infantry') {
-          return;
-        }
-        const target = this.getCrosshairAimPoint();
-        const attackMode = event.button === 2 ? 'special' : 'normal';
-        if (this.combat.fire(
-          this.possessedUnit,
-          target,
-          attackMode,
-        )) {
-          this.audio.fire(this.possessedUnit.kind, attackMode);
-        }
+      if (event.button === 0 || event.button === 2) {
+        this.firePossessedWeapon(event.button);
       }
       return;
     }
@@ -1114,6 +1107,41 @@ export class BrickWarfare {
         return;
       }
       this.selectUnit(this.pickUnit(event));
+    }
+  }
+
+  private updatePossessedFire(): void {
+    if (this.input.isMouseDown(0)) {
+      this.firePossessedWeapon(0);
+    }
+    if (this.input.isMouseDown(2)) {
+      this.firePossessedWeapon(2);
+    }
+  }
+
+  private firePossessedWeapon(button: 0 | 2): void {
+    const unit = this.possessedUnit;
+    if (!unit || unit.destroyed) {
+      return;
+    }
+    if (button === 2 && unit.kind === 'drone') {
+      this.combat.detonateDrone(
+        unit,
+        this.units,
+        this.structures,
+      );
+      return;
+    }
+    if (button === 2 && unit.kind === 'infantry') {
+      return;
+    }
+    const attackMode = button === 2 ? 'special' : 'normal';
+    if (!unit.canFire(attackMode)) {
+      return;
+    }
+    const target = this.getCrosshairAimPoint();
+    if (this.combat.fire(unit, target, attackMode)) {
+      this.audio.fire(unit.kind, attackMode);
     }
   }
 

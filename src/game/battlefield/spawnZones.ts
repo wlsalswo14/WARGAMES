@@ -52,3 +52,13 @@ export function reinforcementSpawnPosition(
     Math.sin(angle) * radius,
   ));
 }
+
+export function reinforcementBaseAnchor(base: BaseLayout): Vector3 {
+  const forward = new Vector3(
+    Math.sin(base.yaw),
+    0,
+    Math.cos(base.yaw),
+  );
+  return new Vector3(base.x, 0, base.z)
+    .addScaledVector(forward, 30);
+}

@@ -30,6 +30,8 @@ const CHALLENGE_FORCE: UnitKind[] = [
   'tank',
   'drone',
   'drone',
+  'helicopter',
+  'fighter',
 ];
 
 const SANDBOX_FORCE: UnitKind[] = [
@@ -58,7 +60,7 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
     id: 'challenge',
     activeFactions: ['azure', 'crimson'],
     initialForce: CHALLENGE_FORCE,
-    targetUnitsPerFaction: 8,
+    targetUnitsPerFaction: CHALLENGE_FORCE.length,
     chunkRadius: 2,
     matchDuration: 3 * 60,
     startingResources: {
@@ -70,6 +72,8 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
       infantry: 35,
       tank: 90,
       drone: 55,
+      helicopter: 110,
+      fighter: 120,
     },
     allowedDeployments: [],
     possessionDuration: null,
