@@ -208,27 +208,48 @@ export class BattleCamera {
       return;
     }
 
-    const distance = unit.kind === 'fighter'
-      ? 18
-      : unit.kind === 'helicopter'
-        ? 14
-        : unit.kind === 'tank'
-          ? 10
-          : 7;
-    const height = unit.kind === 'fighter'
-      ? 5.5
+    if (unit.kind === 'fighter') {
+      const flightDirection = unit.getForwardDirection();
+      const horizontalHeading = flatForward(this.aimYaw);
+      const cameraRight = new Vector3(
+        horizontalHeading.z,
+        0,
+        -horizontalHeading.x,
+      );
+      const desired = anchor
+        .clone()
+        .addScaledVector(horizontalHeading, -20)
+        .addScaledVector(cameraRight, 3.4);
+      desired.y += 7.5;
+      const stabilizedVertical = clamp(
+        flightDirection.y * 0.32 + Math.sin(this.aimPitch) * 0.65,
+        -0.48,
+        0.48,
+      );
+      const stabilizedLook = horizontalHeading
+        .clone()
+        .multiplyScalar(Math.sqrt(1 - stabilizedVertical * stabilizedVertical));
+      stabilizedLook.y = stabilizedVertical;
+      this.camera.position.lerp(desired, 1 - Math.exp(-delta * 8));
+      this.camera.lookAt(
+        anchor.clone().addScaledVector(stabilizedLook, 38),
+      );
+      return;
+    }
+
+    const distance = unit.kind === 'helicopter'
+      ? 14
       : unit.kind === 'tank'
-        ? 3.8
-        : 2.8;
-    const shoulderOffset = unit.kind === 'fighter'
-      ? 4.2
-      : unit.kind === 'helicopter'
-        ? 3.2
-        : unit.kind === 'tank'
-          ? 2.4
-          : unit.kind === 'drone'
-            ? 1.8
-            : 1.15;
+        ? 10
+        : 7;
+    const height = unit.kind === 'tank' ? 3.8 : 2.8;
+    const shoulderOffset = unit.kind === 'helicopter'
+      ? 3.2
+      : unit.kind === 'tank'
+        ? 2.4
+        : unit.kind === 'drone'
+          ? 1.8
+          : 1.15;
     const desired = anchor.clone().addScaledVector(aimDirection, -distance);
     desired.y += height;
     desired.addScaledVector(

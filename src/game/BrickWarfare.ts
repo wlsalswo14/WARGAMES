@@ -1351,7 +1351,9 @@ export class BrickWarfare {
     this.hud.setMode(this.mode);
     this.hud.notify(
       '유닛 빙의 연결',
-      `${FACTIONS[unit.faction].name} ${unit.displayName} 직접 조종 권한 획득`,
+      unit.kind === 'fighter'
+        ? 'Space/Shift 기수 조작 · 3인칭 지평선 추적 · V 기수 시점'
+        : `${FACTIONS[unit.faction].name} ${unit.displayName} 직접 조종 권한 획득`,
       FACTIONS[unit.faction].accent,
     );
     this.input.lockPointer();

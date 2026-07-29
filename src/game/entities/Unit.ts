@@ -24,7 +24,7 @@ import { createUnitModel } from './BrickFactory';
 let nextUnitId = 1;
 const FIGHTER_AI_PITCH_LIMIT = 0.52;
 const FIGHTER_AI_PITCH_RATE = 0.72;
-const FIGHTER_PLAYER_PITCH_RATE = 1.25;
+const FIGHTER_PLAYER_PITCH_RATE = 0.82;
 
 function normalizeRadians(angle: number): number {
   return Math.atan2(Math.sin(angle), Math.cos(angle));
