@@ -58,6 +58,8 @@ export class Unit {
   detectedTimer = 0;
   terrainCollision = false;
   lastDamageFaction: FactionId | null = null;
+  mobilityIntegrity = 1;
+  weaponIntegrity = 1;
   private readonly selectionRing: Mesh;
   private readonly factionMarker: Mesh;
   private readonly aimNode: Object3D;
@@ -188,6 +190,22 @@ export class Unit {
     return names[this.kind];
   }
 
+  get subsystemStatus(): string {
+    if (this.kind === 'infantry' || this.kind === 'general') {
+      return '전투 가능';
+    }
+    if (this.mobilityIntegrity < 0.35 && this.weaponIntegrity < 0.35) {
+      return '기동·화기 치명 손상';
+    }
+    if (this.mobilityIntegrity < 0.55) {
+      return '기동계 손상';
+    }
+    if (this.weaponIntegrity < 0.55) {
+      return '화기계 손상';
+    }
+    return '시스템 정상';
+  }
+
   setSelected(selected: boolean): void {
     this.selected = selected;
     this.selectionRing.scale.setScalar(selected ? 1.32 : 1);
@@ -238,9 +256,14 @@ export class Unit {
     const terrainSpeedScale = this.kind === 'tank' && inDeepTerrain ? 0.5 : 1;
     const maxSpeed = this.stats.speed
       * (forwardInput < 0 ? 0.52 : 1)
-      * terrainSpeedScale;
+      * terrainSpeedScale
+      * (0.38 + this.mobilityIntegrity * 0.62);
     this.throttle = MathUtils.damp(this.throttle, forwardInput, 4.2, delta);
-    this.yaw += turnInput * this.stats.turnRate * delta * (0.35 + Math.abs(this.throttle) * 0.65);
+    this.yaw += turnInput
+      * this.stats.turnRate
+      * (0.45 + this.mobilityIntegrity * 0.55)
+      * delta
+      * (0.35 + Math.abs(this.throttle) * 0.65);
     const forward = flatForward(this.yaw);
     this.desiredVelocity.copy(forward).multiplyScalar(maxSpeed * this.throttle);
     this.velocity.lerp(this.desiredVelocity, 1 - Math.exp(-delta * (this.kind === 'tank' ? 2.2 : 7)));
@@ -275,7 +298,9 @@ export class Unit {
           FIGHTER_AI_PITCH_LIMIT,
         );
       }
-      const speed = this.stats.speed * this.throttle;
+      const speed = this.stats.speed
+        * this.throttle
+        * (0.52 + this.mobilityIntegrity * 0.48);
       const lift = Math.max(0, speed - 22) * 0.045;
       const stall = speed < 29 || (!this.possessed && Math.abs(this.pitch) > 0.45);
       const verticalAcceleration = this.possessed
@@ -305,7 +330,14 @@ export class Unit {
         delta,
       );
       const forward = flatForward(this.yaw);
-      this.velocity.lerp(forward.multiplyScalar(this.stats.speed * this.throttle), 1 - Math.exp(-delta * 2.7));
+      this.velocity.lerp(
+        forward.multiplyScalar(
+          this.stats.speed
+            * this.throttle
+            * (0.52 + this.mobilityIntegrity * 0.48),
+        ),
+        1 - Math.exp(-delta * 2.7),
+      );
       this.velocity.addScaledVector(wind, this.kind === 'drone' ? 0.16 : 0.07);
       this.velocity.y = this.altitudeVelocity;
       this.pitch = MathUtils.damp(this.pitch, -this.throttle * 0.16, 3, delta);
@@ -420,10 +452,12 @@ export class Unit {
   }
 
   markFired(mode: AttackMode, reload: number): void {
+    const adjustedReload = reload
+      * (1 + (1 - this.weaponIntegrity) * 1.35);
     if (mode === 'normal') {
-      this.reloadTimer = reload;
+      this.reloadTimer = adjustedReload;
     } else {
-      this.specialReloadTimer = reload;
+      this.specialReloadTimer = adjustedReload;
     }
   }
 
@@ -442,6 +476,28 @@ export class Unit {
     const ricochet = this.stats.armor > 20 && impactAngle < 0.28 && penetration < effectiveArmor * 1.5;
     const penetrated = !ricochet && penetration >= effectiveArmor;
     const damage = ricochet ? 0 : rawDamage * (penetrated ? 1 : 0.22);
+    if (
+      penetrated
+      && this.kind !== 'infantry'
+      && this.kind !== 'general'
+    ) {
+      const subsystemDamage = clamp(
+        damage / this.stats.maxHealth,
+        0.04,
+        0.38,
+      );
+      if (frontalFactor < 0.52) {
+        this.mobilityIntegrity = Math.max(
+          0.18,
+          this.mobilityIntegrity - subsystemDamage,
+        );
+      } else {
+        this.weaponIntegrity = Math.max(
+          0.18,
+          this.weaponIntegrity - subsystemDamage,
+        );
+      }
+    }
     this.applyRawDamage(damage, attackerFaction);
     return {
       destroyed: this.destroyed,
@@ -462,6 +518,24 @@ export class Unit {
       this.velocity.set(0, 0, 0);
       this.selectionRing.visible = false;
     }
+  }
+
+  repair(amount: number): number {
+    if (this.destroyed || amount <= 0) {
+      return 0;
+    }
+    const previousHealth = this.health;
+    this.health = Math.min(this.stats.maxHealth, this.health + amount);
+    const systemRepair = amount / Math.max(1, this.stats.maxHealth);
+    this.mobilityIntegrity = Math.min(
+      1,
+      this.mobilityIntegrity + systemRepair * 0.85,
+    );
+    this.weaponIntegrity = Math.min(
+      1,
+      this.weaponIntegrity + systemRepair * 0.85,
+    );
+    return this.health - previousHealth;
   }
 
   private updateAnimatedParts(delta: number, elapsed: number): void {

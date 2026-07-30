@@ -2,11 +2,11 @@ import { Vector3 } from 'three';
 import { FACTIONS } from '../config';
 import { BrickStructure } from '../entities/BrickStructure';
 import { terrainHeight } from '../math';
-import type { FactionId } from '../types';
+import type { FactionId, ProductionKind } from '../types';
 
 export interface StructurePlan {
   id: string;
-  kind: 'building' | 'wall' | 'headquarters' | 'factory';
+  kind: 'building' | 'wall' | 'headquarters' | ProductionKind;
   x: number;
   z: number;
   width: number;
@@ -84,15 +84,23 @@ export function createProductionBasePlan(
   point: Vector3,
   yaw: number,
   faction: FactionId,
+  kind: ProductionKind = 'factory',
 ): StructurePlan {
+  const dimensions: Record<
+    ProductionKind,
+    Pick<StructurePlan, 'width' | 'height' | 'depth'>
+  > = {
+    factory: { width: 12, height: 12, depth: 10 },
+    barracks: { width: 18, height: 11, depth: 11 },
+    armorFactory: { width: 22, height: 14, depth: 15 },
+    airfield: { width: 28, height: 8, depth: 17 },
+  };
   return {
-    id: `production-base-${faction}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    kind: 'factory',
+    id: `${kind}-${faction}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    kind,
     x: point.x,
     z: point.z,
-    width: 10,
-    height: 11,
-    depth: 9,
+    ...dimensions[kind],
     yaw,
     color: FACTIONS[faction].color,
     openCenter: true,

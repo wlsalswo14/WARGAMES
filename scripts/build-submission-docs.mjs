@@ -23,6 +23,10 @@ const documents = [
     source: join(projectRoot, 'docs', 'AI_TECHNICAL_DOCUMENT.md'),
     output: join(outputDirectory, 'PROJECT_BRICK_WARFARE_AI_TECHNICAL_DOCUMENT.pdf'),
   },
+  {
+    source: join(projectRoot, 'docs', 'NAN2026_PRELIMINARY_STRATEGY_PLAN.md'),
+    output: join(projectRoot, 'docs', 'NAN2026_PRELIMINARY_STRATEGY_PLAN.pdf'),
+  },
 ];
 
 function escapeHtml(value) {

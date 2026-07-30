@@ -20,6 +20,7 @@ import { chooseReinforcementKind } from './battlefield/forces';
 import {
   getChallengeBattlefield,
 } from './battlefield/challengeLayout';
+import { getConquestBattlefield } from './battlefield/conquestLayout';
 import {
   BASE_LAYOUTS,
   FACTION_ORDER,
@@ -34,7 +35,6 @@ import {
 import {
   createHeadquartersPlan,
   createPlayerBuildingPlan,
-  createProductionBasePlan,
   createStructureFromPlan,
   type StructurePlan,
 } from './battlefield/structurePlans';
@@ -64,13 +64,26 @@ import { BattleCamera } from './systems/BattleCamera';
 import { BrickBurstSystem } from './systems/BrickBurstSystem';
 import { ChallengeSession } from './systems/ChallengeSession';
 import { CombatSystem, type CombatKillEvent } from './systems/CombatSystem';
+import { ConquestRuntime } from './systems/ConquestRuntime';
 import { DiplomacySystem } from './systems/DiplomacySystem';
 import { GameLoop } from './systems/GameLoop';
+import { PlayerProgression } from './systems/PlayerProgression';
+import {
+  canProduceUnit,
+  chooseProductionExpansion,
+  isProductionKind,
+  isUnitKind,
+  PRODUCTION_CATALOG,
+  requiredProductionKind,
+} from './systems/ProductionCatalog';
+import { ProductionNetwork } from './systems/ProductionNetwork';
 import { UnitCollisionSystem } from './systems/UnitCollisionSystem';
 import type {
+  CommanderAbilityKind,
   DeployKind,
   DiplomacyEvent,
   FactionId,
+  FormationType,
   GameMode,
   UnitKind,
 } from './types';
@@ -81,20 +94,6 @@ const FORWARD_KEYS = ['KeyW', 'ArrowUp'] as const;
 const BACKWARD_KEYS = ['KeyS', 'ArrowDown'] as const;
 const LEFT_KEYS = ['KeyA', 'ArrowLeft'] as const;
 const RIGHT_KEYS = ['KeyD', 'ArrowRight'] as const;
-
-interface ProductionBase {
-  outpost: Outpost | null;
-  faction: FactionId;
-  structure: BrickStructure;
-  spawnAnchor: Vector3;
-}
-
-interface ProductionBasePlacement {
-  outpost: Outpost | null;
-  position: Vector3;
-  yaw: number;
-  spawnAnchor: Vector3;
-}
 
 export class BrickWarfare {
   private readonly shell: HTMLDivElement;
@@ -117,10 +116,13 @@ export class BrickWarfare {
     this.challengeFormat,
     new URLSearchParams(window.location.search).get('map'),
   );
+  private readonly conquestBattlefield = getConquestBattlefield();
   private readonly challengeLayout = this.challengeBattlefield.layout;
   private readonly battlefieldTheme = this.playMode === 'challenge'
     ? this.challengeBattlefield.theme
-    : createRandomBattlefieldTheme();
+    : this.playMode === 'conquest'
+      ? this.conquestBattlefield.theme
+      : createRandomBattlefieldTheme();
   private readonly world = new BattlefieldWorld(
     this.battlefieldTheme.palette,
     this.battlefieldTheme.treeDensity,
@@ -131,13 +133,19 @@ export class BrickWarfare {
   private readonly structures: BrickStructure[] = [];
   private readonly outposts: Outpost[] = [];
   private readonly headquarters = new Map<FactionId, BrickStructure>();
-  private readonly productionBases: ProductionBase[] = [];
+  private readonly productionNetwork: ProductionNetwork;
   private readonly destroyedHeadquarters = new Set<FactionId>();
   private readonly eliminatedFactions = new Set<FactionId>();
+  private readonly progression = new PlayerProgression();
   private readonly resources = new Map<FactionId, number>(
     FACTION_ORDER.map((faction) => [
       faction,
-      this.modeConfig.startingResources[faction],
+      this.modeConfig.startingResources[faction]
+        + (
+          this.playMode === 'conquest' && faction === 'azure'
+            ? this.progression.startingSupplyBonus
+            : 0
+        ),
     ]),
   );
   private readonly input: GameInput;
@@ -157,22 +165,29 @@ export class BrickWarfare {
         activeFactions: this.activeFactions,
       })
     : null;
+  private conquestRuntime: ConquestRuntime | null = null;
   private adaptiveDirector: AdaptiveDirector | null = null;
   private readonly gameLoop = new GameLoop(() => this.frame());
   private mode: GameMode = 'god';
   private activeFaction: FactionId = 'azure';
   private selectedUnit: Unit | null = null;
+  private selectedUnits: Unit[] = [];
+  private formation: FormationType = 'line';
+  private selectionDragStart: Vector2 | null = null;
+  private selectionDragCurrent: Vector2 | null = null;
   private possessedUnit: Unit | null = null;
   private deployKind: DeployKind | null = null;
   private simulationRunning = false;
   private elapsed = 0;
   private resourceTimer = WORLD.resourceTick;
   private aiSpawnTimer = 7;
+  private aiBuildTimer = 12;
   private hudRefreshTimer = 0;
   private aiAccumulator = 0;
   private outpostAccumulator = 0;
   private diplomacyAccumulator = 0;
   private headquartersAccumulator = 0;
+  private conquestSiegeAccumulator = 0;
   private victoryFaction: FactionId | null = null;
   private adaptiveSyncTimer = 0;
   private challengeResultShown = false;
@@ -191,17 +206,20 @@ export class BrickWarfare {
     container.append(this.shell);
 
     this.renderer = new WebGLRenderer({
-      antialias: this.playMode === 'sandbox',
+      antialias: this.playMode !== 'challenge',
       powerPreference: 'high-performance',
     });
     this.renderer.domElement.className = 'game-canvas';
     this.renderer.domElement.tabIndex = 0;
-    this.renderer.shadowMap.enabled = this.playMode === 'sandbox';
+    this.renderer.shadowMap.enabled = this.playMode !== 'challenge';
     this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
     this.softwareRendering = this.detectSoftwareRendering();
+    if (this.softwareRendering) {
+      this.renderer.shadowMap.enabled = false;
+    }
     this.shell.append(this.renderer.domElement);
 
     this.scene.background = new Color(0x91afbd);
@@ -221,8 +239,11 @@ export class BrickWarfare {
           this.audio.resume();
           this.simulationRunning = true;
           this.challengeSession?.start();
-          if (this.playMode === 'challenge') {
+          this.conquestRuntime?.start();
+          if (this.playMode !== 'sandbox') {
             const commandUnit = this.units.find(
+              (unit) => unit.faction === this.activeFaction && unit.kind === 'general',
+            ) ?? this.units.find(
               (unit) => unit.faction === this.activeFaction && unit.kind === 'tank',
             ) ?? this.units.find((unit) => unit.faction === this.activeFaction);
             if (commandUnit) {
@@ -237,6 +258,17 @@ export class BrickWarfare {
               `작전 개시 · ${this.battlefieldTheme.label}`,
               `A·B·C 확보 → ${scoreLimit}점 선취 · 1/2/3 명령 · Enter 직접 조종`,
               '#ffcf5d',
+            );
+          } else if (this.playMode === 'conquest') {
+            this.hud.notify(
+              `정복전 개시 · ${this.battlefieldTheme.label}`,
+              '7개 거점을 확보하고 생산망을 확장해 적 본부를 파괴하십시오.',
+              '#ffcf5d',
+            );
+            this.hud.notify(
+              `지휘관 프로필 · ${this.progression.summary}`,
+              '1~4 지휘 능력 · R 대형 변경 · Tab 전술 커서 · 드래그 다중 선택',
+              '#8ed8ff',
             );
           } else {
             this.hud.notify(
@@ -267,6 +299,7 @@ export class BrickWarfare {
             this.enterPossession(this.selectedUnit);
           }
         },
+        onCommanderAbility: (kind) => this.selectCommanderAbility(kind),
       },
     );
 
@@ -275,8 +308,58 @@ export class BrickWarfare {
       (event) => this.onUnitDestroyed(event),
       (damage) => this.hud.flashDamage(0.25 + damage * 2.4),
       (position, radius) => this.onWorldExplosion(position, radius),
-      this.playMode === 'challenge' ? 72 : WORLD.maxProjectiles,
+      this.playMode === 'challenge'
+        ? 72
+        : this.playMode === 'conquest'
+          ? 96
+          : WORLD.maxProjectiles,
     );
+    if (this.playMode === 'conquest') {
+      this.conquestRuntime = new ConquestRuntime(
+        {
+          duration: this.testMode
+            ? 75
+            : (this.modeConfig.matchDuration ?? 720),
+          dominationDuration: this.testMode ? 8 : 30,
+          activeFactions: this.activeFactions,
+          outpostTotal: this.conquestBattlefield.layout.outposts.length,
+          activeFaction: this.activeFaction,
+        },
+        {
+          units: this.units,
+          structures: this.structures,
+          outposts: this.outposts,
+          resources: this.resources,
+          combat: this.combat,
+          progression: this.progression,
+          getHeading: () => this.battleCamera.heading,
+          spawnUnit: (kind, faction, position) => (
+            this.spawnUnit(kind, faction, position)
+          ),
+          selectUnits: (units) => this.selectUnits(units),
+          notify: (title, body, color) => (
+            this.hud.notify(title, body, color)
+          ),
+          playCommand: () => this.audio.command(),
+          createRepairEffect: (point, colors) => {
+            this.brickBursts.burstAt(point, colors, 18, 7);
+          },
+        },
+      );
+    }
+    this.productionNetwork = new ProductionNetwork({
+      scene: this.scene,
+      structures: this.structures,
+      outposts: this.outposts,
+      headquarters: this.headquarters,
+      getHeading: () => this.battleCamera.heading,
+      notify: (title, body, color) => (
+        this.hud.notify(title, body, color)
+      ),
+      onBuilt: (faction) => {
+        this.conquestRuntime?.session.recordBuilding(faction);
+      },
+    });
     this.collisions = new UnitCollisionSystem({
       units: this.units,
       structures: this.structures,
@@ -301,6 +384,8 @@ export class BrickWarfare {
     this.input = new GameInput(this.renderer.domElement, {
       onKeyDown: (event) => this.handleKeyDown(event),
       onMouseDown: (event) => this.handleMouseDown(event),
+      onMouseMove: (event) => this.handleMouseMove(event),
+      onMouseUp: (event) => this.handleMouseUp(event),
       onMouseLook: (movementX, movementY) => this.handleMouseLook(movementX, movementY),
       onWheel: (deltaY) => this.handleWheel(deltaY),
       onDoubleClick: (event) => this.handleDoubleClick(event),
@@ -338,7 +423,7 @@ export class BrickWarfare {
     this.scene.add(new AmbientLight(0x8aa0a8, 0.38));
     const sun = new DirectionalLight(0xfff0d4, 3.1);
     sun.position.set(-170, 240, 95);
-    sun.castShadow = this.playMode === 'sandbox';
+    sun.castShadow = this.playMode !== 'challenge';
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -330;
     sun.shadow.camera.right = 330;
@@ -358,13 +443,19 @@ export class BrickWarfare {
 
     const outpostLayouts = this.playMode === 'challenge'
       ? this.challengeLayout.outposts
-      : OUTPOST_LAYOUTS;
+      : this.playMode === 'conquest'
+        ? this.conquestBattlefield.layout.outposts
+        : OUTPOST_LAYOUTS;
     const baseLayouts = this.playMode === 'challenge'
       ? this.challengeLayout.bases
-      : BASE_LAYOUTS;
+      : this.playMode === 'conquest'
+        ? this.conquestBattlefield.layout.bases
+        : BASE_LAYOUTS;
     const stagingLayouts = this.playMode === 'challenge'
       ? this.challengeLayout.staging
-      : STAGING_SPAWN_LAYOUTS;
+      : this.playMode === 'conquest'
+        ? this.conquestBattlefield.layout.staging
+        : STAGING_SPAWN_LAYOUTS;
 
     for (const [index, layout] of outpostLayouts.entries()) {
       const position = new Vector3(
@@ -394,12 +485,20 @@ export class BrickWarfare {
           position.x,
           position.z,
           layout.yaw,
-          this.playMode === 'challenge',
+          this.playMode !== 'sandbox',
         ),
       );
       this.structures.push(headquarters);
       this.headquarters.set(faction, headquarters);
       this.scene.add(headquarters.root);
+
+      if (this.playMode === 'conquest') {
+        this.productionNetwork.createStartingBase(
+          faction,
+          position,
+          layout.yaw,
+        );
+      }
 
       const spawnAnchors = [
         position,
@@ -426,7 +525,9 @@ export class BrickWarfare {
 
     const structurePlans = this.playMode === 'challenge'
       ? this.challengeBattlefield.structures
-      : this.createSandboxStructurePlans();
+      : this.playMode === 'conquest'
+        ? this.conquestBattlefield.structures
+        : this.createSandboxStructurePlans();
     for (const plan of structurePlans) {
       const structure = createStructureFromPlan(plan);
       this.structures.push(structure);
@@ -493,7 +594,7 @@ export class BrickWarfare {
       const simulationDelta = this.battleCamera.isKillCameraActive
         ? delta * 0.24
         : delta;
-      this.updateSimulation(simulationDelta, wallDelta);
+      this.updateSimulation(simulationDelta, simulationDelta);
       this.battleCamera.updateKillCamera(delta);
     }
     this.battleCamera.update(delta, this.mode, this.possessedUnit);
@@ -552,6 +653,13 @@ export class BrickWarfare {
         },
       );
     }
+    if (this.playMode === 'conquest') {
+      this.conquestSiegeAccumulator += delta;
+      if (this.conquestSiegeAccumulator >= 0.4) {
+        this.updateConquestSiege(this.conquestSiegeAccumulator);
+        this.conquestSiegeAccumulator = 0;
+      }
+    }
 
     for (const unit of this.units) {
       unit.update(delta, this.elapsed);
@@ -597,6 +705,7 @@ export class BrickWarfare {
       this.cleanupDestroyedUnits();
     }
     this.updateChallenge(challengeDelta);
+    this.updateConquest(challengeDelta);
 
     if (
       this.possessedUnit?.destroyed
@@ -654,6 +763,36 @@ export class BrickWarfare {
       this.audio.result(snapshot.winner === this.activeFaction);
       this.hud.showResult(snapshot);
     }
+  }
+
+  private updateConquest(delta: number): void {
+    if (!this.conquestRuntime) {
+      return;
+    }
+    const result = this.conquestRuntime.update(
+      delta,
+      this.getChallengeOutpostCounts(),
+    );
+    if (!result) {
+      return;
+    }
+    this.simulationRunning = false;
+    this.input.unlockPointer();
+    this.audio.result(result.snapshot.winner === this.activeFaction);
+    this.hud.showConquestResult(result.snapshot, result.reward);
+  }
+
+  private selectCommanderAbility(kind: CommanderAbilityKind): void {
+    if (
+      this.playMode !== 'conquest'
+      || this.mode !== 'god'
+      || !this.simulationRunning
+    ) {
+      return;
+    }
+    this.deployKind = null;
+    this.hud.setDeploy(null);
+    this.conquestRuntime?.selectAbility(kind);
   }
 
   private getChallengeOutpostCounts(): Record<FactionId, number> {
@@ -718,6 +857,7 @@ export class BrickWarfare {
       if (capturedBy) {
         this.world.setTerritories(this.outposts);
         this.challengeSession?.recordCapture(capturedBy);
+        this.conquestRuntime?.session.recordCapture(capturedBy);
         this.audio.capture(capturedBy);
         this.hud.notify(
           `${outpost.label} 거점 점령`,
@@ -735,6 +875,7 @@ export class BrickWarfare {
   private updateEconomy(delta: number): void {
     this.resourceTimer -= delta;
     this.aiSpawnTimer -= delta;
+    this.aiBuildTimer -= delta;
     if (this.resourceTimer <= 0) {
       this.resourceTimer = WORLD.resourceTick;
       for (const faction of this.activeFactions) {
@@ -744,14 +885,28 @@ export class BrickWarfare {
         const outpostCount = this.outposts.filter(
           (outpost) => outpost.owner === faction,
         ).length;
-        const outpostIncome = outpostCount * (this.playMode === 'challenge' ? 4 : 14);
-        const baseIncome = this.playMode === 'challenge' ? 5 : 18;
+        const outpostIncome = outpostCount * (
+          this.playMode === 'challenge'
+            ? 4
+            : this.playMode === 'conquest'
+              ? 8
+              : 14
+        );
+        const baseIncome = this.playMode === 'challenge'
+          ? 5
+          : this.playMode === 'conquest'
+            ? 8
+            : 18;
+        const productionIncome = this.playMode === 'conquest'
+          ? this.productionNetwork.incomeBonus(faction)
+          : 0;
         const doctrineBonus = FACTIONS[faction].doctrine === 'entrenchment' ? 4 : 0;
         this.resources.set(
           faction,
           (this.resources.get(faction) ?? 0)
             + baseIncome
             + outpostIncome
+            + productionIncome
             + doctrineBonus,
         );
       }
@@ -759,21 +914,34 @@ export class BrickWarfare {
     if (this.aiSpawnTimer <= 0) {
       this.aiSpawnTimer = 5;
       for (const faction of this.activeFactions) {
-        this.spawnAiReinforcement(faction);
+        this.spawnAiReinforcement(
+          faction,
+          this.playMode === 'conquest'
+            && faction === this.activeFaction
+            ? 10
+            : undefined,
+        );
       }
+    }
+    if (this.playMode === 'conquest' && this.aiBuildTimer <= 0) {
+      this.aiBuildTimer = 14;
+      this.updateConquestAiInfrastructure();
     }
   }
 
-  private spawnAiReinforcement(faction: FactionId): void {
+  private spawnAiReinforcement(
+    faction: FactionId,
+    targetOverride?: number,
+  ): void {
     const alive = this.units.filter((unit) => unit.faction === faction && !unit.destroyed).length;
-    const operationalProductionBases = this.productionBases.filter(
-      (productionBase) => (
-        productionBase.faction === faction
-        && this.isProductionBaseOperational(productionBase)
-      ),
-    );
-    const targetUnitCount = this.modeConfig.targetUnitsPerFaction
-      + Math.min(2, operationalProductionBases.length);
+    const operationalProductionBases = this.productionNetwork
+      .operationalFor(faction);
+    const targetUnitCount = targetOverride
+      ?? this.productionNetwork.unitCapacity(
+        faction,
+        this.modeConfig.targetUnitsPerFaction,
+        this.playMode,
+      );
     if (
       alive === 0
       || alive >= targetUnitCount
@@ -786,18 +954,24 @@ export class BrickWarfare {
     const headquarters = this.headquarters.get(faction);
     const baseLayouts = this.playMode === 'challenge'
       ? this.challengeLayout.bases
-      : BASE_LAYOUTS;
-    const spawnAnchors = [
-      ...(
-        headquarters && !headquarters.destroyed
-          ? [reinforcementBaseAnchor(baseLayouts[faction])]
-          : []
-      ),
-      ...ownedOutposts.map((outpost) => outpost.root.position),
-      ...operationalProductionBases.map(
-        (productionBase) => productionBase.spawnAnchor,
-      ),
-    ];
+      : this.playMode === 'conquest'
+        ? this.conquestBattlefield.layout.bases
+        : BASE_LAYOUTS;
+    const spawnAnchors = this.playMode === 'conquest'
+      ? operationalProductionBases.map(
+          (productionBase) => productionBase.spawnAnchor,
+        )
+      : [
+          ...(
+            headquarters && !headquarters.destroyed
+              ? [reinforcementBaseAnchor(baseLayouts[faction])]
+              : []
+          ),
+          ...ownedOutposts.map((outpost) => outpost.root.position),
+          ...operationalProductionBases.map(
+            (productionBase) => productionBase.spawnAnchor,
+          ),
+        ];
     if (spawnAnchors.length === 0) {
       return;
     }
@@ -805,8 +979,17 @@ export class BrickWarfare {
     const missing = targetUnitCount - alive;
     const spawnCount = Math.min(missing, spawnAnchors.length, 2);
     let spawnedCount = 0;
+    const producibleKinds = new Set<UnitKind>(
+      operationalProductionBases.flatMap(
+        (productionBase) => PRODUCTION_CATALOG[productionBase.kind].unitKinds,
+      ),
+    );
     for (let index = 0; index < spawnCount; index += 1) {
-      const kind = chooseReinforcementKind(strategy);
+      const preferredKind = chooseReinforcementKind(strategy);
+      const kind = this.playMode !== 'conquest' || producibleKinds.has(preferredKind)
+        ? preferredKind
+        : [...producibleKinds][(sequence + index) % Math.max(1, producibleKinds.size)]
+          ?? 'infantry';
       const reinforcementCost = this.modeConfig.deploymentCosts[kind] ?? 0;
       const balance = this.resources.get(faction) ?? 0;
       if (!this.modeConfig.unlimitedDeployment && balance < reinforcementCost) {
@@ -824,15 +1007,160 @@ export class BrickWarfare {
     this.reinforcementSequence.set(faction, sequence + spawnedCount);
   }
 
-  private isProductionBaseOperational(
-    productionBase: ProductionBase,
-  ): boolean {
-    return !productionBase.structure.destroyed
-      && productionBase.structure.integrity > 0.35
-      && (
-        productionBase.outpost === null
-        || productionBase.outpost.owner === productionBase.faction
+  private updateConquestAiInfrastructure(): void {
+    for (const faction of this.activeFactions) {
+      if (
+        faction === this.activeFaction
+        || this.eliminatedFactions.has(faction)
+      ) {
+        continue;
+      }
+      const existingKinds = this.productionNetwork
+        .operationalFor(faction)
+        .map((productionBase) => productionBase.kind);
+      const kind = chooseProductionExpansion(existingKinds);
+      const cost = this.modeConfig.deploymentCosts[kind] ?? 0;
+      const balance = this.resources.get(faction) ?? 0;
+      const ownedOutposts = this.outposts.filter(
+        (outpost) => outpost.owner === faction,
       );
+      if (
+        ownedOutposts.length > 0
+        && balance >= cost
+        && existingKinds.length < 7
+      ) {
+        const outpost = ownedOutposts
+          .filter(
+            (candidate) => !this.productionNetwork.bases.some(
+              (productionBase) => (
+                productionBase.outpost === candidate
+                && productionBase.faction === faction
+                && !productionBase.structure.destroyed
+              ),
+            ),
+          )[0] ?? ownedOutposts[0];
+        const placement = this.productionNetwork.findAiPlacement(
+          faction,
+          outpost,
+          existingKinds.length,
+        );
+        if (placement) {
+          this.resources.set(faction, balance - cost);
+          this.productionNetwork.create(
+            faction,
+            kind,
+            placement,
+            false,
+          );
+        }
+      }
+      const objective = this.outposts
+        .filter((outpost) => outpost.owner !== faction)
+        .sort((left, right) => {
+          const leftPriority = left.owner === this.activeFaction ? 0 : 1;
+          const rightPriority = right.owner === this.activeFaction ? 0 : 1;
+          return leftPriority - rightPriority;
+        })[0];
+      if (objective) {
+        this.ai.setPriorityObjective(faction, objective.id, 12);
+      }
+    }
+  }
+
+  private updateConquestSiege(delta: number): void {
+    for (const faction of this.activeFactions) {
+      const controlled = this.outposts.filter(
+        (outpost) => outpost.owner === faction,
+      ).length;
+      if (controlled < 3 || this.eliminatedFactions.has(faction)) {
+        continue;
+      }
+      const opponents = this.activeFactions.filter(
+        (candidate) => (
+          candidate !== faction
+          && !this.eliminatedFactions.has(candidate)
+        ),
+      );
+      const opponent = opponents[0];
+      if (!opponent) {
+        continue;
+      }
+      const enemyHeadquarters = this.headquarters.get(opponent);
+      const enemyProduction = this.productionNetwork
+        .operationalFor(opponent)
+        .map((productionBase) => productionBase.structure);
+      const strategicTargets = controlled >= 5
+        && enemyHeadquarters
+        && !enemyHeadquarters.destroyed
+        ? [enemyHeadquarters, ...enemyProduction]
+        : enemyProduction;
+      const target = strategicTargets[0];
+      if (!target) {
+        continue;
+      }
+      const attackers = this.units
+        .filter(
+          (unit) => (
+            unit.faction === faction
+            && !unit.destroyed
+            && !unit.possessed
+            && (
+              unit.kind === 'tank'
+              || unit.kind === 'fighter'
+              || unit.kind === 'helicopter'
+              || unit.kind === 'general'
+            )
+          ),
+        )
+        .sort(
+          (left, right) => (
+            left.position.distanceToSquared(target.root.position)
+            - right.position.distanceToSquared(target.root.position)
+          ),
+        )
+        .slice(0, 3);
+      for (const unit of attackers) {
+        const distance = unit.position.distanceTo(target.root.position);
+        const aimPoint = target.root.position.clone().add(
+          new Vector3(0, Math.min(10, target.collisionRadius * 0.5), 0),
+        );
+        if (
+          distance <= unit.stats.range * 0.92
+          && unit.canFire('special')
+        ) {
+          if (this.combat.fire(unit, aimPoint, 'special')) {
+            this.audio.fire(unit.kind, 'special');
+          }
+          continue;
+        }
+        if (
+          faction !== this.activeFaction
+          && (!unit.order || unit.order.type === 'hold')
+        ) {
+          const approach = unit.position.clone()
+            .sub(target.root.position)
+            .setY(0);
+          if (approach.lengthSq() < 0.1) {
+            approach.set(faction === 'azure' ? -1 : 1, 0, 0);
+          }
+          approach.normalize();
+          const destination = target.root.position.clone()
+            .addScaledVector(
+              approach,
+              Math.max(20, unit.stats.range * 0.55),
+            );
+          destination.y = unit.isAircraft
+            ? terrainHeight(destination.x, destination.z)
+              + (unit.kind === 'fighter' ? 34 : 18)
+            : terrainHeight(destination.x, destination.z);
+          unit.order = {
+            type: 'move',
+            destination,
+          };
+          unit.faceTarget(aimPoint, delta);
+        }
+      }
+    }
   }
 
   private checkFactionEliminations(): void {
@@ -867,6 +1195,16 @@ export class BrickWarfare {
           'elimination',
         );
       }
+      if (this.conquestRuntime && faction === this.activeFaction) {
+        const opponents = this.activeFactions.filter(
+          (candidate) => candidate !== this.activeFaction
+            && !this.eliminatedFactions.has(candidate),
+        );
+        this.conquestRuntime.session.finish(
+          this.findLeadingFaction(opponents),
+          'elimination',
+        );
+      }
     }
     if (territoryChanged) {
       this.world.setTerritories(this.outposts);
@@ -877,6 +1215,10 @@ export class BrickWarfare {
     if (survivors.length === 1 && this.victoryFaction === null) {
       this.victoryFaction = survivors[0];
       this.challengeSession?.finish(this.victoryFaction, 'elimination');
+      this.conquestRuntime?.session.finish(
+        this.victoryFaction,
+        'elimination',
+      );
       this.hud.notify(
         '전쟁 승리',
         `${FACTIONS[this.victoryFaction].name}이 최후의 생존 국가가 되었습니다.`,
@@ -892,8 +1234,12 @@ export class BrickWarfare {
       if (!unit.destroyed || destroyedTime === undefined || this.elapsed - destroyedTime < 8) {
         continue;
       }
-      if (this.selectedUnit === unit) {
-        this.selectUnit(null);
+      if (this.selectedUnits.includes(unit)) {
+        unit.setSelected(false);
+        this.selectedUnits = this.selectedUnits.filter(
+          (selected) => selected !== unit,
+        );
+        this.selectedUnit = this.selectedUnits[0] ?? null;
       }
       if (this.possessedUnit === unit) {
         this.exitPossession();
@@ -973,11 +1319,33 @@ export class BrickWarfare {
           this.challengeSession.finish(this.activeFaction, 'headquarters');
         }
       }
+      if (this.conquestRuntime) {
+        const opponents = this.activeFactions.filter(
+          (candidate) => candidate !== this.activeFaction,
+        );
+        if (faction === this.activeFaction) {
+          this.conquestRuntime.session.finish(
+            this.findLeadingFaction(opponents),
+            'headquarters',
+          );
+        } else if (
+          opponents.every(
+            (opponent) => this.destroyedHeadquarters.has(opponent)
+              || this.eliminatedFactions.has(opponent),
+          )
+        ) {
+          this.conquestRuntime.session.finish(
+            this.activeFaction,
+            'headquarters',
+          );
+        }
+      }
     }
   }
 
   private findLeadingFaction(candidates: readonly FactionId[]): FactionId | null {
-    const scores = this.challengeSession?.snapshot().scores;
+    const scores = this.challengeSession?.snapshot().scores
+      ?? this.conquestRuntime?.session.snapshot().commandPoints;
     if (!scores || candidates.length === 0) {
       return null;
     }
@@ -1026,6 +1394,40 @@ export class BrickWarfare {
       },
       neutralOutposts,
     });
+    if (this.playMode === 'conquest') {
+      const operational = this.productionNetwork.operationalFor(
+        this.activeFaction,
+      );
+      const buildingCounts = {
+        barracks: operational.filter(
+          (productionBase) => productionBase.kind === 'barracks',
+        ).length,
+        armor: operational.filter(
+          (productionBase) => productionBase.kind === 'armorFactory',
+        ).length,
+        air: operational.filter(
+          (productionBase) => productionBase.kind === 'airfield',
+        ).length,
+      };
+      const income = 8
+        + outpostCounts[this.activeFaction] * 8
+        + operational.reduce(
+          (total, productionBase) => (
+            total + PRODUCTION_CATALOG[productionBase.kind].incomeBonus
+          ),
+          0,
+        );
+      this.hud.setEconomySummary(
+        `병력 ${unitCounts[this.activeFaction]} / ${this.productionNetwork.unitCapacity(
+          this.activeFaction,
+          this.modeConfig.targetUnitsPerFaction,
+          this.playMode,
+        )} · +${income} SUP / ${WORLD.resourceTick}초\n`
+        + `막사 ${buildingCounts.barracks} · 기갑 ${buildingCounts.armor} · 비행장 ${buildingCounts.air}`,
+      );
+    } else {
+      this.hud.setEconomySummary(null);
+    }
     if (this.challengeSession && this.adaptiveDirector) {
       this.hud.setChallengeState({
         session: this.challengeSession.snapshot(),
@@ -1042,11 +1444,110 @@ export class BrickWarfare {
         })),
       });
     }
-    this.hud.setSelection(this.possessedUnit ?? this.selectedUnit);
+    if (this.conquestRuntime) {
+      const snapshot = this.conquestRuntime.session.snapshot();
+      const controlled = outpostCounts[this.activeFaction];
+      const enemyControlled = outpostCounts.crimson;
+      const phase = controlled <= 1
+        ? '초기 거점 확보 · 정찰 분산'
+        : controlled < enemyControlled
+          ? '방어선 재편 · 적 생산망 차단'
+          : controlled >= Math.ceil(this.outposts.length * 0.65)
+            ? '최종 공세 · 적 본부 압박'
+            : '생산망 확장 · 중앙 전선 돌파';
+      this.hud.setConquestState({
+        session: snapshot,
+        phase,
+        objectives: this.outposts.map((outpost) => ({
+          label: outpost.label,
+          owner: outpost.owner,
+          captureFaction: outpost.captureFaction,
+          capturePercent: Math.min(
+            100,
+            (outpost.captureProgress / WORLD.outpostCaptureTime) * 100,
+          ),
+          contested: outpost.contested,
+        })),
+      });
+      this.hud.setCommanderState(
+        this.conquestRuntime.abilityState(),
+        this.conquestRuntime.pending,
+        this.conquestRuntime.progressionSummary,
+      );
+    }
+    this.hud.setSelection(
+      this.possessedUnit ?? this.selectedUnit,
+      this.possessedUnit ? 1 : this.selectedUnits.length,
+      this.formation,
+    );
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    if (event.code === 'KeyF' && this.mode === 'god') {
+    if (
+      event.code === 'Escape'
+      && this.mode === 'god'
+      && (this.deployKind || this.conquestRuntime?.pending)
+    ) {
+      this.deployKind = null;
+      this.conquestRuntime?.cancelTargeting();
+      this.hud.setDeploy(null);
+      this.hud.notify(
+        '전술 도구 취소',
+        '부대 선택과 지휘 상태로 복귀했습니다.',
+        '#8ed8ff',
+      );
+      event.preventDefault();
+    } else if (
+      event.code === 'Tab'
+      && this.mode === 'god'
+      && this.playMode === 'conquest'
+      && !event.repeat
+    ) {
+      if (this.input.pointerLocked) {
+        this.input.unlockPointer();
+        this.hud.notify(
+          '전술 커서 활성화',
+          '드래그로 여러 부대를 선택하고 우클릭으로 대형 명령을 내리십시오.',
+          '#8ed8ff',
+        );
+      } else {
+        this.input.lockPointer();
+      }
+      event.preventDefault();
+    } else if (
+      event.code === 'KeyR'
+      && this.mode === 'god'
+      && this.playMode === 'conquest'
+      && !event.repeat
+    ) {
+      const formations: FormationType[] = ['line', 'wedge', 'column'];
+      const index = formations.indexOf(this.formation);
+      this.formation = formations[(index + 1) % formations.length];
+      this.hud.notify(
+        '부대 대형 변경',
+        this.formation === 'line'
+          ? '횡대: 넓은 화력선'
+          : this.formation === 'wedge'
+            ? '쐐기: 돌파 전개'
+            : '종대: 좁은 길과 시가지 이동',
+        '#8ed8ff',
+      );
+      event.preventDefault();
+    } else if (
+      this.playMode === 'conquest'
+      && this.mode === 'god'
+      && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(event.code)
+    ) {
+      const abilities: CommanderAbilityKind[] = [
+        'artillery',
+        'airstrike',
+        'reinforce',
+        'repair',
+      ];
+      const index = Number.parseInt(event.code.slice(-1), 10) - 1;
+      this.selectCommanderAbility(abilities[index]);
+      event.preventDefault();
+    } else if (event.code === 'KeyF' && this.mode === 'god') {
       this.cycleFaction();
     } else if (event.code === 'KeyG' && this.mode === 'possession') {
       this.exitPossession();
@@ -1107,6 +1608,11 @@ export class BrickWarfare {
 
   private handlePointerLockChange(locked: boolean): void {
     this.hud.setPointerLocked(locked);
+    if (locked) {
+      this.selectionDragStart = null;
+      this.selectionDragCurrent = null;
+      this.hud.setSelectionBox(null);
+    }
     if (this.mode === 'possession' && !locked) {
       this.exitPossession();
     }
@@ -1132,14 +1638,21 @@ export class BrickWarfare {
     if (!this.simulationRunning) {
       return;
     }
-    if (!this.input.pointerLocked) {
-      this.input.lockPointer();
-    }
     if (this.mode === 'possession') {
+      if (!this.input.pointerLocked) {
+        this.input.lockPointer();
+      }
       if (event.button === 0 || event.button === 2) {
         this.firePossessedWeapon(event.button);
       }
       return;
+    }
+
+    if (
+      !this.input.pointerLocked
+      && this.playMode !== 'conquest'
+    ) {
+      this.input.lockPointer();
     }
 
     if (event.button === 2) {
@@ -1149,6 +1662,16 @@ export class BrickWarfare {
     }
 
     if (event.button === 0) {
+      if (this.conquestRuntime?.pending) {
+        const point = this.pickGround(event);
+        if (point) {
+          this.conquestRuntime.activateAbility(
+            this.conquestRuntime.pending,
+            point,
+          );
+        }
+        return;
+      }
       if (this.deployKind) {
         const point = this.pickGround(event);
         if (point) {
@@ -1156,8 +1679,103 @@ export class BrickWarfare {
         }
         return;
       }
+      if (
+        this.playMode === 'conquest'
+        && !this.input.pointerLocked
+      ) {
+        this.selectionDragStart = new Vector2(event.clientX, event.clientY);
+        this.selectionDragCurrent = this.selectionDragStart.clone();
+        this.updateSelectionBox();
+        return;
+      }
       this.selectUnit(this.pickUnit(event));
     }
+  }
+
+  private handleMouseMove(event: MouseEvent): void {
+    if (!this.selectionDragStart || this.input.pointerLocked) {
+      return;
+    }
+    this.selectionDragCurrent = new Vector2(event.clientX, event.clientY);
+    this.updateSelectionBox();
+  }
+
+  private handleMouseUp(event: MouseEvent): void {
+    if (
+      event.button !== 0
+      || !this.selectionDragStart
+      || !this.selectionDragCurrent
+    ) {
+      return;
+    }
+    const start = this.selectionDragStart;
+    const end = this.selectionDragCurrent;
+    const dragDistance = start.distanceTo(end);
+    this.selectionDragStart = null;
+    this.selectionDragCurrent = null;
+    this.hud.setSelectionBox(null);
+    if (dragDistance < 7) {
+      const unit = this.pickUnit(event);
+      this.selectUnits(
+        unit ? [unit] : [],
+        event.shiftKey,
+      );
+      return;
+    }
+    const left = Math.min(start.x, end.x);
+    const right = Math.max(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const bottom = Math.max(start.y, end.y);
+    const canvasRect = this.renderer.domElement.getBoundingClientRect();
+    const selected = this.units.filter((unit) => {
+      if (
+        unit.destroyed
+        || unit.faction !== this.activeFaction
+      ) {
+        return false;
+      }
+      const projected = unit.position.clone()
+        .add(new Vector3(0, unit.collisionRadius, 0))
+        .project(this.camera);
+      if (projected.z < -1 || projected.z > 1) {
+        return false;
+      }
+      const screenX = canvasRect.left
+        + (projected.x + 1) * 0.5 * canvasRect.width;
+      const screenY = canvasRect.top
+        + (1 - projected.y) * 0.5 * canvasRect.height;
+      return screenX >= left
+        && screenX <= right
+        && screenY >= top
+        && screenY <= bottom;
+    });
+    this.selectUnits(selected, event.shiftKey);
+  }
+
+  private updateSelectionBox(): void {
+    if (!this.selectionDragStart || !this.selectionDragCurrent) {
+      this.hud.setSelectionBox(null);
+      return;
+    }
+    const shellRect = this.shell.getBoundingClientRect();
+    const left = Math.min(
+      this.selectionDragStart.x,
+      this.selectionDragCurrent.x,
+    ) - shellRect.left;
+    const top = Math.min(
+      this.selectionDragStart.y,
+      this.selectionDragCurrent.y,
+    ) - shellRect.top;
+    this.hud.setSelectionBox({
+      left,
+      top,
+      width: Math.abs(
+        this.selectionDragCurrent.x - this.selectionDragStart.x,
+      ),
+      height: Math.abs(
+        this.selectionDragCurrent.y - this.selectionDragStart.y,
+      ),
+    });
   }
 
   private updatePossessedFire(): void {
@@ -1216,34 +1834,38 @@ export class BrickWarfare {
   }
 
   private issueGodCommand(event: MouseEvent): void {
-    if (!this.selectedUnit || this.selectedUnit.destroyed) {
+    const commandableUnits = this.selectedUnits.filter(
+      (unit) => (
+        !unit.destroyed
+        && (
+          this.playMode === 'sandbox'
+          || unit.faction === this.activeFaction
+        )
+      ),
+    );
+    if (commandableUnits.length === 0) {
       return;
     }
     if (
-      this.playMode === 'challenge'
-      && this.selectedUnit.faction !== this.activeFaction
+      this.playMode !== 'sandbox'
+      && commandableUnits.length !== this.selectedUnits.length
     ) {
       this.hud.notify(
         '명령 권한 없음',
-        'Challenge에서는 청람 연합 유닛만 지휘할 수 있습니다.',
+        '정규 작전에서는 아군 유닛만 지휘할 수 있습니다.',
         '#ff746b',
       );
-      return;
     }
     const targetUnit = this.pickUnit(event);
     const point = targetUnit?.position.clone() ?? this.pickGround(event);
     if (!point) {
       return;
     }
-    this.selectedUnit.order = {
-      type: targetUnit ? 'attack' : 'move',
-      destination: point,
-      targetId: targetUnit?.id,
-    };
+    this.commandUnitsInFormation(commandableUnits, point, targetUnit);
     const commandedOutpost = this.findClosestOutpost(point, 42);
     if (this.adaptiveDirector) {
       const observation = this.adaptiveDirector.observeCommand(
-        this.selectedUnit.kind,
+        commandableUnits[0].kind,
         commandedOutpost,
         this.outposts,
       );
@@ -1258,10 +1880,84 @@ export class BrickWarfare {
     }
     this.hud.notify(
       '전술 명령 전송',
-      `${this.selectedUnit.displayName}: ${targetUnit ? '표적 교전' : '지정 위치로 이동'}`,
-      FACTIONS[this.selectedUnit.faction].accent,
+      `${commandableUnits.length}개 부대: ${
+        targetUnit ? '표적 집중 교전' : `${this.formation} 대형으로 이동`
+      }`,
+      FACTIONS[commandableUnits[0].faction].accent,
     );
     this.audio.command();
+  }
+
+  private commandUnitsInFormation(
+    units: Unit[],
+    point: Vector3,
+    targetUnit: Unit | null,
+  ): void {
+    const center = units.reduce(
+      (total, unit) => total.add(unit.position),
+      new Vector3(),
+    ).multiplyScalar(1 / Math.max(1, units.length));
+    const forward = point.clone().sub(center).setY(0);
+    if (forward.lengthSq() < 0.1) {
+      forward.set(
+        Math.sin(this.battleCamera.heading),
+        0,
+        Math.cos(this.battleCamera.heading),
+      );
+    } else {
+      forward.normalize();
+    }
+    const lateral = new Vector3(forward.z, 0, -forward.x);
+    for (const [index, unit] of units.entries()) {
+      const destination = point.clone();
+      if (!targetUnit) {
+        destination.add(
+          this.getFormationOffset(
+            index,
+            units.length,
+            forward,
+            lateral,
+          ),
+        );
+      }
+      const ground = terrainHeight(destination.x, destination.z);
+      destination.y = unit.kind === 'fighter'
+        ? ground + 34
+        : unit.kind === 'helicopter'
+          ? ground + 18
+          : unit.kind === 'drone'
+            ? ground + 12
+            : ground;
+      unit.order = {
+        type: targetUnit ? 'attack' : 'move',
+        destination,
+        targetId: targetUnit?.id,
+      };
+    }
+  }
+
+  private getFormationOffset(
+    index: number,
+    count: number,
+    forward: Vector3,
+    lateral: Vector3,
+  ): Vector3 {
+    const spacing = 6.5;
+    if (this.formation === 'line') {
+      return lateral.clone().multiplyScalar(
+        (index - (count - 1) / 2) * spacing,
+      );
+    }
+    if (this.formation === 'column') {
+      return forward.clone().multiplyScalar(-index * spacing);
+    }
+    if (index === 0) {
+      return new Vector3();
+    }
+    const row = Math.ceil(index / 2);
+    const side = index % 2 === 0 ? 1 : -1;
+    return lateral.clone().multiplyScalar(side * row * spacing)
+      .addScaledVector(forward, -row * spacing * 0.7);
   }
 
   private commandSelectedToOutpost(index: number): void {
@@ -1282,10 +1978,17 @@ export class BrickWarfare {
     if (!unit || unit.faction !== this.activeFaction) {
       return;
     }
-    unit.order = {
-      type: 'move',
-      destination: outpost.root.position.clone(),
-    };
+    const units = this.selectedUnits.filter(
+      (candidate) => (
+        !candidate.destroyed
+        && candidate.faction === this.activeFaction
+      ),
+    );
+    this.commandUnitsInFormation(
+      units.length > 0 ? units : [unit],
+      outpost.root.position.clone(),
+      null,
+    );
     if (this.adaptiveDirector) {
       const observation = this.adaptiveDirector.observeCommand(
         unit.kind,
@@ -1303,7 +2006,7 @@ export class BrickWarfare {
     }
     this.hud.notify(
       `${outpost.label} 거점 진격`,
-      `${unit.displayName}에 점령 명령을 전송했습니다. Enter로 직접 조종할 수 있습니다.`,
+      `${Math.max(1, units.length)}개 부대에 점령 명령을 전송했습니다. Enter로 선두 유닛을 직접 조종할 수 있습니다.`,
       FACTIONS[unit.faction].accent,
     );
     this.audio.command();
@@ -1360,13 +2063,40 @@ export class BrickWarfare {
   }
 
   private selectUnit(unit: Unit | null): void {
-    this.selectedUnit?.setSelected(false);
-    this.selectedUnit = unit;
-    unit?.setSelected(true);
+    this.selectUnits(unit ? [unit] : []);
+  }
+
+  private selectUnits(units: Unit[], additive = false): void {
+    const selectable = units.filter(
+      (unit, index, candidates) => (
+        !unit.destroyed
+        && candidates.indexOf(unit) === index
+        && (
+          this.playMode === 'sandbox'
+          || unit.faction === this.activeFaction
+        )
+      ),
+    );
+    const next = additive
+      ? [
+          ...this.selectedUnits.filter((unit) => !unit.destroyed),
+          ...selectable.filter((unit) => !this.selectedUnits.includes(unit)),
+        ]
+      : selectable;
+    for (const unit of this.selectedUnits) {
+      if (!next.includes(unit)) {
+        unit.setSelected(false);
+      }
+    }
+    for (const unit of next) {
+      unit.setSelected(true);
+    }
+    this.selectedUnits = next;
+    this.selectedUnit = next[0] ?? null;
   }
 
   private enterPossession(unit: Unit): void {
-    if (this.playMode === 'challenge' && unit.faction !== this.activeFaction) {
+    if (this.playMode !== 'sandbox' && unit.faction !== this.activeFaction) {
       this.hud.notify(
         '빙의 권한 없음',
         '적월 유닛의 전술 링크에는 접속할 수 없습니다.',
@@ -1428,14 +2158,34 @@ export class BrickWarfare {
   private toggleDeploy(kind: DeployKind): void {
     if (!this.modeConfig.allowedDeployments.includes(kind)) {
       this.hud.notify(
-        'Challenge 제한',
+        '모드 제한',
         '현재 모드에서 사용할 수 없는 배치 도구입니다.',
         '#ffcf5d',
       );
       return;
     }
+    this.conquestRuntime?.cancelTargeting();
     this.deployKind = this.deployKind === kind ? null : kind;
     this.hud.setDeploy(this.deployKind);
+    if (this.playMode === 'conquest' && this.deployKind) {
+      if (isUnitKind(kind)) {
+        const required = requiredProductionKind(kind);
+        const logisticsAlternative = canProduceUnit('factory', kind)
+          ? ' 또는 전방 군수기지'
+          : '';
+        this.hud.notify(
+          `${kind === 'general' ? '지휘관' : '유닛'} 생산 대기`,
+          `${PRODUCTION_CATALOG[required].label}${logisticsAlternative} 근처를 클릭해 출격시키십시오.`,
+          '#8ed8ff',
+        );
+      } else if (isProductionKind(kind)) {
+        this.hud.notify(
+          `${PRODUCTION_CATALOG[kind].label} 건설 대기`,
+          '아군이 점령한 거점 가장자리를 클릭하십시오.',
+          '#8ed8ff',
+        );
+      }
+    }
   }
 
   private deployAt(point: Vector3): void {
@@ -1444,7 +2194,7 @@ export class BrickWarfare {
       return;
     }
     if (
-      this.playMode === 'challenge'
+      this.playMode !== 'sandbox'
       && this.eliminatedFactions.has(this.activeFaction)
     ) {
       this.hud.notify(
@@ -1456,57 +2206,67 @@ export class BrickWarfare {
     }
     if (
       !this.modeConfig.unlimitedDeployment
-      && this.playMode === 'challenge'
-      && (kind === 'infantry'
-        || kind === 'tank'
-        || kind === 'fighter'
-        || kind === 'helicopter'
-        || kind === 'drone')
+      && isUnitKind(kind)
       && this.units.filter(
         (unit) => unit.faction === this.activeFaction && !unit.destroyed,
-      ).length >= this.modeConfig.targetUnitsPerFaction + 4
+      ).length >= (
+        this.playMode === 'conquest'
+          ? this.productionNetwork.unitCapacity(
+              this.activeFaction,
+              this.modeConfig.targetUnitsPerFaction,
+              this.playMode,
+            )
+          : this.modeConfig.targetUnitsPerFaction + 4
+      )
     ) {
       this.hud.notify(
         '지휘 한도 도달',
-        '동시 운용 병력은 최대 16개입니다.',
+        '생산시설을 확장하거나 기존 병력을 운용해 지휘 한도를 확보하십시오.',
         '#ffcf5d',
       );
       return;
     }
-    const productionBasePlacement = kind === 'factory'
-      ? this.findProductionBasePlacement(point)
+    const productionKind = isProductionKind(kind) ? kind : null;
+    const productionBasePlacement = productionKind
+      ? this.productionNetwork.findPlayerPlacement(
+          point,
+          productionKind,
+          this.activeFaction,
+          this.playMode,
+        )
       : null;
-    if (kind === 'factory' && !productionBasePlacement) {
+    if (productionKind && !productionBasePlacement) {
+      return;
+    }
+    const productionSource = (
+      this.playMode === 'conquest'
+      && isUnitKind(kind)
+    )
+      ? this.productionNetwork.findPlayerSource(
+          kind,
+          point,
+          this.activeFaction,
+        )
+      : null;
+    if (
+      this.playMode === 'conquest'
+      && isUnitKind(kind)
+      && !productionSource
+    ) {
       return;
     }
     if (!this.spendDeploymentCost(kind)) {
       return;
     }
-    if (kind === 'factory') {
+    if (productionKind) {
       if (!productionBasePlacement) {
         return;
       }
-      const structure = createStructureFromPlan(
-        createProductionBasePlan(
-          productionBasePlacement.position,
-          productionBasePlacement.yaw,
-          this.activeFaction,
-        ),
-      );
-      this.structures.push(structure);
-      this.productionBases.push({
-        outpost: productionBasePlacement.outpost,
-        faction: this.activeFaction,
-        structure,
-        spawnAnchor: productionBasePlacement.spawnAnchor,
-      });
-      this.scene.add(structure.root);
-      this.hud.notify(
-        '생산기지 완공',
-        productionBasePlacement.outpost
-          ? `${productionBasePlacement.outpost.label} 거점에서 증원 상한이 증가합니다.`
-          : '새 생산기지가 증원 거점으로 가동됩니다.',
-        FACTIONS[this.activeFaction].accent,
+      this.productionNetwork.create(
+        this.activeFaction,
+        productionKind,
+        productionBasePlacement,
+        true,
       );
       if (this.playMode === 'challenge') {
         this.deployKind = null;
@@ -1552,7 +2312,7 @@ export class BrickWarfare {
       structure.root.rotation.y = this.battleCamera.heading;
       this.structures.push(structure);
       this.scene.add(structure.root);
-    } else {
+    } else if (isUnitKind(kind)) {
       if (this.eliminatedFactions.has(this.activeFaction)) {
         this.eliminatedFactions.delete(this.activeFaction);
         this.victoryFaction = null;
@@ -1562,102 +2322,10 @@ export class BrickWarfare {
           FACTIONS[this.activeFaction].accent,
         );
       }
-      const unit = this.spawnUnit(kind, this.activeFaction, point);
+      const spawnPoint = productionSource?.spawnAnchor ?? point;
+      const unit = this.spawnUnit(kind, this.activeFaction, spawnPoint);
       this.selectUnit(unit);
     }
-  }
-
-  private findProductionBasePlacement(
-    point: Vector3,
-  ): ProductionBasePlacement | null {
-    if (this.playMode === 'sandbox') {
-      const position = new Vector3(
-        point.x,
-        terrainHeight(point.x, point.z),
-        point.z,
-      );
-      const outward = new Vector3(
-        Math.sin(this.battleCamera.heading),
-        0,
-        Math.cos(this.battleCamera.heading),
-      );
-      return {
-        outpost: null,
-        position,
-        yaw: this.battleCamera.heading,
-        spawnAnchor: position.clone().addScaledVector(outward, 18),
-      };
-    }
-
-    const outpost = this.findClosestOutpost(
-      point,
-      WORLD.outpostCaptureRadius * 1.8,
-    );
-    if (!outpost || outpost.owner !== this.activeFaction) {
-      this.hud.notify(
-        '건설 구역 밖',
-        '점령한 거점 가까이에서만 생산기지를 건설할 수 있습니다.',
-        '#ffcf5d',
-      );
-      return null;
-    }
-    if (
-      this.productionBases.some(
-        (productionBase) => (
-          productionBase.outpost === outpost
-          && !productionBase.structure.destroyed
-          && productionBase.structure.integrity > 0.35
-        ),
-      )
-    ) {
-      this.hud.notify(
-        '생산기지 한도',
-        `${outpost.label} 거점에는 이미 생산기지가 있습니다.`,
-        '#ffcf5d',
-      );
-      return null;
-    }
-
-    const radial = point.clone().sub(outpost.root.position);
-    radial.y = 0;
-    if (radial.lengthSq() < 0.1) {
-      radial.set(
-        Math.sin(this.battleCamera.heading),
-        0,
-        Math.cos(this.battleCamera.heading),
-      );
-    }
-    radial.normalize();
-    const baseAngle = Math.atan2(radial.x, radial.z);
-    const placementRadius = WORLD.outpostCaptureRadius + 10;
-    for (const offset of [0, 0.62, -0.62, 1.24, -1.24, Math.PI]) {
-      const angle = baseAngle + offset;
-      const outward = new Vector3(Math.sin(angle), 0, Math.cos(angle));
-      const position = outpost.root.position.clone()
-        .addScaledVector(outward, placementRadius);
-      position.y = terrainHeight(position.x, position.z);
-      const obstructed = this.structures.some(
-        (structure) => (
-          !structure.destroyed
-          && structure.containsWorldPoint(position, 6)
-        ),
-      );
-      if (!obstructed) {
-        return {
-          outpost,
-          position,
-          yaw: angle + Math.PI,
-          spawnAnchor: position.clone().addScaledVector(outward, 18),
-        };
-      }
-    }
-
-    this.hud.notify(
-      '건설 공간 부족',
-      `${outpost.label} 거점 주변의 다른 방향을 클릭해 주세요.`,
-      '#ffcf5d',
-    );
-    return null;
   }
 
   private spendDeploymentCost(kind: DeployKind): boolean {
@@ -1748,6 +2416,14 @@ export class BrickWarfare {
         event.attackerFaction,
         event.victim.kind === 'general' ? 12 : 2,
       );
+      this.conquestRuntime?.session.recordKill(
+        event.attackerFaction,
+        event.victim.kind === 'general'
+          ? 18
+          : event.victim.kind === 'tank' || event.victim.isAircraft
+            ? 5
+            : 2,
+      );
     }
 
     const playerDeath = event.victim === this.possessedUnit;
@@ -1800,7 +2476,11 @@ export class BrickWarfare {
     this.camera.updateProjectionMatrix();
     const maximumPixelRatio = this.softwareRendering
       ? (this.playMode === 'challenge' ? 0.68 : 0.82)
-      : (this.playMode === 'challenge' ? 1 : 1.25);
+      : this.playMode === 'challenge'
+        ? 1
+        : this.playMode === 'conquest'
+          ? 1.1
+          : 1.25;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maximumPixelRatio));
     this.renderer.setSize(width, height, false);
   }

@@ -1,6 +1,6 @@
 import type { DeployKind, FactionId, UnitKind } from '../types';
 
-export type PlayMode = 'challenge' | 'sandbox';
+export type PlayMode = 'challenge' | 'conquest' | 'sandbox';
 export type ChallengeFormat = 'duel' | 'triple';
 
 export interface PlayModeConfig {
@@ -55,6 +55,21 @@ const SANDBOX_FORCE: UnitKind[] = [
   'fighter',
 ];
 
+const CONQUEST_FORCE: UnitKind[] = [
+  'infantry',
+  'infantry',
+  'infantry',
+  'infantry',
+  'infantry',
+  'general',
+  'tank',
+  'tank',
+  'drone',
+  'drone',
+  'helicopter',
+  'fighter',
+];
+
 export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
   challenge: {
     id: 'challenge',
@@ -84,6 +99,48 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
     enableFactionCycle: false,
     enableKillCamera: false,
   },
+  conquest: {
+    id: 'conquest',
+    activeFactions: ['azure', 'crimson'],
+    initialForce: CONQUEST_FORCE,
+    targetUnitsPerFaction: 22,
+    chunkRadius: 3,
+    matchDuration: 12 * 60,
+    startingResources: {
+      azure: 520,
+      crimson: 520,
+      amber: 520,
+    },
+    deploymentCosts: {
+      infantry: 35,
+      general: 180,
+      tank: 105,
+      drone: 65,
+      helicopter: 145,
+      fighter: 170,
+      factory: 160,
+      barracks: 140,
+      armorFactory: 230,
+      airfield: 290,
+    },
+    allowedDeployments: [
+      'infantry',
+      'general',
+      'tank',
+      'drone',
+      'helicopter',
+      'fighter',
+      'barracks',
+      'armorFactory',
+      'airfield',
+    ],
+    possessionDuration: null,
+    possessionRecharge: 0,
+    unlimitedDeployment: false,
+    enableDiplomacy: false,
+    enableFactionCycle: false,
+    enableKillCamera: false,
+  },
   sandbox: {
     id: 'sandbox',
     activeFactions: ['azure', 'crimson', 'amber'],
@@ -99,6 +156,7 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
     deploymentCosts: {},
     allowedDeployments: [
       'infantry',
+      'general',
       'tank',
       'fighter',
       'helicopter',
@@ -108,6 +166,9 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
       'trench',
       'building',
       'factory',
+      'barracks',
+      'armorFactory',
+      'airfield',
       'tree',
     ],
     possessionDuration: null,
@@ -121,7 +182,10 @@ export const PLAY_MODE_CONFIGS: Record<PlayMode, PlayModeConfig> = {
 
 export function getRequestedPlayMode(search = window.location.search): PlayMode {
   const requested = new URLSearchParams(search).get('mode');
-  return requested === 'sandbox' ? 'sandbox' : 'challenge';
+  if (requested === 'challenge' || requested === 'sandbox') {
+    return requested;
+  }
+  return 'conquest';
 }
 
 export function getRequestedChallengeFormat(

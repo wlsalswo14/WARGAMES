@@ -1,6 +1,8 @@
 interface GameInputCallbacks {
   onKeyDown: (event: KeyboardEvent) => void;
   onMouseDown: (event: MouseEvent) => void;
+  onMouseMove: (event: MouseEvent) => void;
+  onMouseUp: (event: MouseEvent) => void;
   onMouseLook: (movementX: number, movementY: number) => void;
   onWheel: (deltaY: number) => void;
   onDoubleClick: (event: MouseEvent) => void;
@@ -113,6 +115,7 @@ export class GameInput {
   };
 
   private readonly handleMouseMove = (event: MouseEvent): void => {
+    this.callbacks.onMouseMove(event);
     if (this.pointerLocked) {
       this.callbacks.onMouseLook(event.movementX, event.movementY);
     }
@@ -134,6 +137,7 @@ export class GameInput {
 
   private readonly handleMouseUp = (event: MouseEvent): void => {
     this.mouseButtons.delete(event.button);
+    this.callbacks.onMouseUp(event);
   };
 
   private readonly handleDoubleClick = (event: MouseEvent): void => {

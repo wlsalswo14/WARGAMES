@@ -6,10 +6,18 @@ import type {
 } from '../modes/PlayMode';
 import type { AdaptivePrediction } from '../systems/AdaptiveDirector';
 import type { ChallengeSessionSnapshot } from '../systems/ChallengeSession';
+import {
+  COMMANDER_ABILITIES,
+  type CommanderAbilityState,
+} from '../systems/CommanderAbilitySystem';
+import type { ConquestSessionSnapshot } from '../systems/ConquestSession';
+import type { ProgressionReward } from '../systems/PlayerProgression';
 import type {
   BattlefieldStats,
+  CommanderAbilityKind,
   DeployKind,
   FactionId,
+  FormationType,
   GameMode,
   Relation,
 } from '../types';
@@ -23,6 +31,7 @@ interface HudCallbacks {
   onCycleFaction: () => void;
   onDiplomacy: (target: FactionId) => void;
   onPossess: () => void;
+  onCommanderAbility: (kind: CommanderAbilityKind) => void;
 }
 
 interface ChallengeHudState {
@@ -37,8 +46,15 @@ interface ChallengeHudState {
   }>;
 }
 
+interface ConquestHudState {
+  session: ConquestSessionSnapshot;
+  objectives: ChallengeHudState['objectives'];
+  phase: string;
+}
+
 const DEPLOYMENTS: Array<{ kind: DeployKind; label: string }> = [
   { kind: 'infantry', label: '보병' },
+  { kind: 'general', label: '지휘관' },
   { kind: 'tank', label: '전차' },
   { kind: 'fighter', label: '전투기' },
   { kind: 'helicopter', label: '헬기' },
@@ -48,8 +64,17 @@ const DEPLOYMENTS: Array<{ kind: DeployKind; label: string }> = [
   { kind: 'trench', label: '참호' },
   { kind: 'building', label: '대형 건물' },
   { kind: 'factory', label: '생산기지' },
+  { kind: 'barracks', label: '보병 막사' },
+  { kind: 'armorFactory', label: '기갑 공장' },
+  { kind: 'airfield', label: '전술 비행장' },
   { kind: 'tree', label: '나무' },
 ];
+
+const FORMATION_LABELS: Record<FormationType, string> = {
+  line: '횡대',
+  wedge: '쐐기',
+  column: '종대',
+};
 
 export class Hud {
   readonly root: HTMLDivElement;
@@ -59,6 +84,7 @@ export class Hud {
   private readonly unitStatsLabel: HTMLElement;
   private readonly factionPanel: HTMLDivElement;
   private readonly relationList: HTMLDivElement;
+  private readonly economyLabel: HTMLElement;
   private readonly factionName: HTMLElement;
   private readonly selectionPanel: HTMLDivElement;
   private readonly selectionName: HTMLElement;
@@ -71,6 +97,9 @@ export class Hud {
   private readonly godControls: HTMLDivElement;
   private readonly possessionControls: HTMLDivElement;
   private readonly deployDock: HTMLDivElement;
+  private readonly commanderDock: HTMLDivElement;
+  private readonly profileLabel: HTMLElement;
+  private readonly selectionBox: HTMLDivElement;
   private readonly factionButton: HTMLButtonElement;
   private readonly damageVignette: HTMLDivElement;
   private readonly challengePanel: HTMLDivElement;
@@ -85,6 +114,10 @@ export class Hud {
   private readonly resultOverlay: HTMLDivElement;
   private readonly possessButton: HTMLButtonElement;
   private readonly deployButtons = new Map<DeployKind, HTMLButtonElement>();
+  private readonly abilityButtons = new Map<
+    CommanderAbilityKind,
+    HTMLButtonElement
+  >();
   private activeDeploy: DeployKind | null = null;
   private currentFaction: FactionId = 'azure';
   private currentMode: GameMode = 'god';
@@ -109,6 +142,7 @@ export class Hud {
     this.unitStatsLabel = this.require('[data-ui="unit-stats"]');
     this.factionPanel = this.require('[data-ui="faction-panel"]');
     this.relationList = this.require('[data-ui="relation-list"]');
+    this.economyLabel = this.require('[data-ui="economy"]');
     this.factionName = this.require('[data-ui="faction-name"]');
     this.selectionPanel = this.require('[data-ui="selection-panel"]');
     this.selectionName = this.require('[data-ui="selection-name"]');
@@ -121,6 +155,9 @@ export class Hud {
     this.godControls = this.require('[data-ui="controls-god"]');
     this.possessionControls = this.require('[data-ui="controls-possession"]');
     this.deployDock = this.require('[data-ui="deploy-dock"]');
+    this.commanderDock = this.require('[data-ui="commander-dock"]');
+    this.profileLabel = this.require('[data-ui="profile"]');
+    this.selectionBox = this.require('[data-ui="selection-box"]');
     this.damageVignette = this.require('[data-ui="damage-vignette"]');
     this.challengePanel = this.require('[data-ui="challenge-panel"]');
     this.challengeTimer = this.require('[data-ui="challenge-timer"]');
@@ -137,9 +174,11 @@ export class Hud {
     this.bindSplash();
     this.factionButton = this.createFactionButton();
     this.createDeployButtons();
+    this.createCommanderButtons();
     this.setFaction('azure');
-    this.challengePanel.classList.toggle('hidden', playMode !== 'challenge');
-    this.tutorial.classList.toggle('hidden', playMode !== 'challenge');
+    this.challengePanel.classList.toggle('hidden', playMode === 'sandbox');
+    this.commanderDock.classList.toggle('hidden', playMode !== 'conquest');
+    this.tutorial.classList.toggle('hidden', playMode === 'sandbox');
   }
 
   configureMode(config: PlayModeConfig): void {
@@ -175,6 +214,10 @@ export class Hud {
       this.tutorial.classList.add('hidden');
     }
     this.deployDock.classList.toggle('hidden', possessed || !this.hasDeployments);
+    this.commanderDock.classList.toggle(
+      'hidden',
+      possessed || this.playMode !== 'conquest',
+    );
   }
 
   setPointerLocked(locked: boolean): void {
@@ -205,7 +248,13 @@ export class Hud {
       stats.eliminated.azure ? '청람 멸망' : `청람 ${stats.unitCounts.azure}`,
       stats.eliminated.crimson ? '적월 멸망' : `적월 ${stats.unitCounts.crimson}`,
     ];
-    if (this.playMode === 'sandbox' || this.challengeFormat === 'triple') {
+    if (
+      this.playMode === 'sandbox'
+      || (
+        this.playMode === 'challenge'
+        && this.challengeFormat === 'triple'
+      )
+    ) {
       outposts.push(`황토 ${stats.outpostCounts.amber}`);
       units.push(stats.eliminated.amber ? '황토 멸망' : `황토 ${stats.unitCounts.amber}`);
     }
@@ -214,16 +263,29 @@ export class Hud {
     this.unitStatsLabel.textContent = units.join(' · ');
   }
 
-  setSelection(unit: Unit | null): void {
+  setEconomySummary(summary: string | null): void {
+    this.economyLabel.classList.toggle('hidden', !summary);
+    this.economyLabel.textContent = summary ?? '';
+  }
+
+  setSelection(
+    unit: Unit | null,
+    count = unit ? 1 : 0,
+    formation: FormationType = 'line',
+  ): void {
     this.selectionPanel.classList.toggle('hidden', !unit);
     if (!unit) {
       return;
     }
-    this.selectionName.textContent = unit.displayName;
+    this.selectionName.textContent = count > 1
+      ? `${unit.displayName} 외 ${count - 1}개 부대`
+      : unit.displayName;
     this.selectionFaction.textContent = FACTIONS[unit.faction].name;
     this.selectionFaction.style.color = FACTIONS[unit.faction].accent;
     this.selectionType.textContent = unit.possessed
       ? '직접 조종 중'
+      : count > 1
+        ? `${FORMATION_LABELS[formation]} 대형 · R 변경`
       : unit.order
         ? this.orderLabel(unit.order.type)
         : '대기';
@@ -234,7 +296,7 @@ export class Hud {
         : ` · ${unit.specialAttackName} 준비`;
     this.selectionHealth.textContent = unit.destroyed
       ? '파괴됨'
-      : `${Math.ceil(unit.health)} / ${unit.stats.maxHealth}${specialState}`;
+      : `${Math.ceil(unit.health)} / ${unit.stats.maxHealth}${specialState} · ${unit.subsystemStatus}`;
     this.healthBar.style.setProperty(
       '--health',
       `${Math.max(0, (unit.health / unit.stats.maxHealth) * 100)}%`,
@@ -243,8 +305,11 @@ export class Hud {
 
   setRelations(relations: Map<FactionId, Relation>): void {
     this.relationList.replaceChildren();
-    if (this.playMode === 'challenge') {
-      const opponents: FactionId[] = this.challengeFormat === 'triple'
+    if (this.playMode !== 'sandbox') {
+      const opponents: FactionId[] = (
+        this.playMode === 'challenge'
+        && this.challengeFormat === 'triple'
+      )
         ? ['crimson', 'amber']
         : ['crimson'];
       for (const opponent of opponents) {
@@ -333,6 +398,84 @@ export class Hud {
     );
   }
 
+  setConquestState(state: ConquestHudState): void {
+    const totalSeconds = Math.ceil(state.session.remainingSeconds);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    this.challengeTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    this.challengeScore.textContent = `${state.session.commandPoints.azure} : ${state.session.commandPoints.crimson} CP`;
+    const dominationPercent = state.session.dominationTarget > 0
+      ? state.session.dominationSeconds / state.session.dominationTarget * 100
+      : 0;
+    this.linkFill.style.width = `${Math.min(100, dominationPercent)}%`;
+    this.linkLabel.textContent = state.session.dominationSeconds > 0
+      ? `완전 점령 ${state.session.dominationSeconds.toFixed(1)} / ${state.session.dominationTarget}초`
+      : '전 거점 30초 장악 시 승리';
+    this.predictionTarget.textContent = state.phase;
+    this.predictionConfidence.textContent = 'LIVE';
+    this.objectiveStrip.replaceChildren(
+      ...state.objectives.map((objective) => {
+        const chip = document.createElement('div');
+        const ownerClass = objective.owner ?? 'neutral';
+        chip.className = `objective-chip owner-${ownerClass}${
+          objective.contested ? ' contested' : ''
+        }`;
+        const activeFaction = objective.captureFaction ?? objective.owner;
+        const color = activeFaction
+          ? FACTIONS[activeFaction].accent
+          : '#d7e1e8';
+        const stateLabel = objective.contested
+          ? '교전 중'
+          : objective.captureFaction
+            ? `${FACTIONS[objective.captureFaction].name} 점령 중`
+            : objective.owner
+              ? FACTIONS[objective.owner].name
+              : '중립';
+        chip.style.setProperty('--objective-color', color);
+        chip.innerHTML = `
+          <b>${objective.label}</b>
+          <span><i style="width:${objective.capturePercent}%"></i></span>
+          <small>${stateLabel}</small>
+        `;
+        return chip;
+      }),
+    );
+  }
+
+  setCommanderState(
+    states: CommanderAbilityState[],
+    pending: CommanderAbilityKind | null,
+    profile: string,
+  ): void {
+    this.profileLabel.textContent = profile;
+    for (const state of states) {
+      const button = this.abilityButtons.get(state.kind);
+      if (!button) {
+        continue;
+      }
+      button.classList.toggle('active', pending === state.kind);
+      button.classList.toggle('cooldown', state.remaining > 0);
+      button.disabled = !state.ready && pending !== state.kind;
+      const status = state.remaining > 0
+        ? `${state.remaining.toFixed(0)}초`
+        : `${state.cost} SUP`;
+      button.innerHTML = `<strong>${state.label}</strong><small>${status}</small>`;
+    }
+  }
+
+  setSelectionBox(
+    rect: { left: number; top: number; width: number; height: number } | null,
+  ): void {
+    this.selectionBox.classList.toggle('hidden', !rect);
+    if (!rect) {
+      return;
+    }
+    this.selectionBox.style.left = `${rect.left}px`;
+    this.selectionBox.style.top = `${rect.top}px`;
+    this.selectionBox.style.width = `${rect.width}px`;
+    this.selectionBox.style.height = `${rect.height}px`;
+  }
+
   showResult(snapshot: ChallengeSessionSnapshot): void {
     const title = snapshot.winner === 'azure'
       ? '작전 성공'
@@ -376,6 +519,52 @@ export class Hud {
     );
   }
 
+  showConquestResult(
+    snapshot: ConquestSessionSnapshot,
+    reward: ProgressionReward,
+  ): void {
+    const title = snapshot.winner === 'azure'
+      ? '정복전 승리'
+      : snapshot.winner
+        ? '정복전 패배'
+        : '교착 상태';
+    const reason = snapshot.finishReason === 'domination'
+      ? '전 거점 완전 장악'
+      : snapshot.finishReason === 'headquarters'
+        ? '적 지휘 본부 파괴'
+        : snapshot.finishReason === 'elimination'
+          ? '적 전투 병력 전멸'
+          : '작전 시간 종료';
+    this.resultOverlay.innerHTML = `
+      <div class="result-card">
+        <div class="eyebrow">CONQUEST AFTER ACTION REPORT</div>
+        <h2>${title}</h2>
+        <p>${reason}</p>
+        <div class="result-score">${snapshot.commandPoints.azure} : ${snapshot.commandPoints.crimson} CP</div>
+        <div class="result-stats">
+          <span>거점 점령 <b>${snapshot.captures}</b></span>
+          <span>격파 <b>${snapshot.kills}</b></span>
+          <span>생산시설 <b>${snapshot.buildings}</b></span>
+          <span>지휘 능력 <b>${snapshot.abilities}</b></span>
+        </div>
+        <p class="rank-reward">+${reward.earnedXp} XP · ${reward.rankName}${
+          reward.rankUp ? ' 진급!' : ''
+        }</p>
+        <button type="button" data-action="retry">다시 정복전</button>
+        <button type="button" data-action="sandbox">Sandbox로 이동</button>
+      </div>
+    `;
+    this.resultOverlay.classList.remove('hidden');
+    this.resultOverlay.querySelector('[data-action="retry"]')?.addEventListener(
+      'click',
+      () => window.location.reload(),
+    );
+    this.resultOverlay.querySelector('[data-action="sandbox"]')?.addEventListener(
+      'click',
+      () => this.callbacks.onModeSelect('sandbox'),
+    );
+  }
+
   notify(title: string, body: string, color = '#56b8ff'): void {
     const message = document.createElement('div');
     message.className = 'message';
@@ -402,6 +591,7 @@ export class Hud {
 
   private createMarkup(): string {
     const challengeSelected = this.playMode === 'challenge' ? 'selected' : '';
+    const conquestSelected = this.playMode === 'conquest' ? 'selected' : '';
     const sandboxSelected = this.playMode === 'sandbox' ? 'selected' : '';
     const duelSelected = this.challengeFormat === 'duel' ? 'selected' : '';
     const tripleSelected = this.challengeFormat === 'triple' ? 'selected' : '';
@@ -413,25 +603,38 @@ export class Hud {
           <span>SUP <b data-ui="resources">0</b></span>
           <span>거점 <b data-ui="outpost-stats">-</b></span>
           <span>병력 <b data-ui="unit-stats">-</b></span>
+          <span class="command-profile" data-ui="profile">소위 · 0 XP</span>
         </div>
       </div>
       <section class="challenge-panel hidden" data-ui="challenge-panel">
-        <div><small>남은 시간</small><strong data-ui="challenge-timer">3:00</strong></div>
+        <div><small>남은 시간</small><strong data-ui="challenge-timer">${
+          this.playMode === 'conquest' ? '12:00' : '3:00'
+        }</strong></div>
         <div><small>${
-          this.challengeFormat === 'triple'
+          this.playMode === 'conquest'
+            ? 'COMMAND POINT · 청람 : 적월'
+            : this.challengeFormat === 'triple'
             ? '청람 : 적월 : 황토'
             : '지휘 점수 · 청람 : 적월'
         }</small><strong data-ui="challenge-score">${
-          this.challengeFormat === 'triple' ? '0 : 0 : 0 / 100' : '0 : 0 / 100'
+          this.playMode === 'conquest'
+            ? '0 : 0 CP'
+            : this.challengeFormat === 'triple'
+              ? '0 : 0 : 0 / 100'
+              : '0 : 0 / 100'
         }</strong></div>
         <div class="command-link">
-          <small>DIRECT LINK</small>
-          <strong data-ui="link-label">즉시 빙의 가능</strong>
+          <small>${this.playMode === 'conquest' ? 'TOTAL DOMINATION' : 'DIRECT LINK'}</small>
+          <strong data-ui="link-label">${
+            this.playMode === 'conquest' ? '전 거점 30초 장악 시 승리' : '즉시 빙의 가능'
+          }</strong>
           <span><i data-ui="link-fill"></i></span>
         </div>
         <div class="ai-read">
-          <small>ENEMY COMMANDER</small>
-          <strong data-ui="prediction-target">적 지휘관이 전선을 분석 중</strong>
+          <small>${this.playMode === 'conquest' ? 'OPERATION PHASE' : 'ENEMY COMMANDER'}</small>
+          <strong data-ui="prediction-target">${
+            this.playMode === 'conquest' ? '초기 거점 확보' : '적 지휘관이 전선을 분석 중'
+          }</strong>
           <b data-ui="prediction-confidence">대기</b>
         </div>
         <div class="objective-strip" data-ui="objective-strip"></div>
@@ -439,6 +642,7 @@ export class Hud {
       <section class="faction-panel" data-ui="faction-panel">
         <h2 data-ui="faction-name">청람 연합</h2>
         <div data-ui="relation-list"></div>
+        <div class="economy-summary hidden" data-ui="economy"></div>
       </section>
       <section class="selection-panel hidden" data-ui="selection-panel">
         <h2 data-ui="selection-name">선택 없음</h2>
@@ -451,19 +655,21 @@ export class Hud {
         <button class="possess-button" data-ui="possess-button" type="button">선택 유닛 직접 조종 <span>[ENTER]</span></button>
       </section>
       <div class="deploy-dock" data-ui="deploy-dock"></div>
+      <div class="commander-dock hidden" data-ui="commander-dock"></div>
       <div class="message-log" data-ui="message-log"></div>
       <div class="crosshair hidden" data-ui="crosshair"></div>
+      <div class="selection-box hidden" data-ui="selection-box"></div>
       <div class="tutorial" data-ui="tutorial">
-        <b>1 / 2 / 3</b> 선택 유닛을 A / B / C 거점으로 명령<br />
-        <b>우클릭</b> 원하는 위치로 진격 명령<br />
-        <b>Enter / 더블클릭</b> 즉시 직접 조종<br />
-        <b>B</b> 점령 거점 생산기지 건설<br />
-        거점을 지켜 <b>100점</b>을 먼저 확보
+        ${this.playMode === 'conquest'
+          ? '<b>Tab</b> 전술 커서 · 드래그 다중 선택<br /><b>우클릭</b> 대형 이동/공격 · <b>R</b> 대형 변경<br /><b>1~4</b> 포격/공습/증원/수리 · <b>Enter</b> 직접 조종<br />거점 확보 → 생산시설 건설 → 적 본부 파괴'
+          : '<b>1 / 2 / 3</b> 선택 유닛을 A / B / C 거점으로 명령<br /><b>우클릭</b> 원하는 위치로 진격 명령<br /><b>Enter / 더블클릭</b> 즉시 직접 조종<br /><b>B</b> 점령 거점 생산기지 건설<br />거점을 지켜 <b>100점</b>을 먼저 확보'}
       </div>
       <div class="controls controls-god" data-ui="controls-god">
         <b>마우스</b> 이동 방향으로 시점 · <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>Space/Shift</b> 상승/하강<br />
         ${this.playMode === 'challenge'
           ? '<b>좌클릭</b> 선택/건설 · <b>1/2/3</b> 거점 명령 · <b>B</b> 생산기지 · <b>Enter</b> 빙의'
+          : this.playMode === 'conquest'
+            ? '<b>Tab</b> 커서 · <b>드래그</b> 분대 선택 · <b>우클릭</b> 명령 · <b>1~4</b> 지휘 능력 · <b>R</b> 대형'
           : '<b>좌클릭</b> 배치/선택 · <b>우클릭</b> 명령 · <b>1~0</b> 도구 · <b>F</b> 진영'}
       </div>
       <div class="controls controls-possession hidden" data-ui="controls-possession">
@@ -477,10 +683,14 @@ export class Hud {
           <div class="eyebrow">BLOCKS · BALLISTICS · ADAPTIVE WARFARE</div>
           <h1>PROJECT<br /><span>BRICK WARFARE</span></h1>
           <p>
-            전장을 지휘하고, 가장 결정적인 순간 직접 뛰어드십시오.<br />
-            세 거점을 두고 벌이는 3분짜리 블록 전장 하이브리드 RTS입니다.
+            생산망과 7개 전선을 지휘하고, 결정적인 순간 직접 뛰어드십시오.<br />
+            파괴된 도시가 길을 바꾸는 블록 전장 하이브리드 RTS입니다.
           </p>
           <div class="mode-selector">
+            <button class="mode-card ${conquestSelected}" type="button" data-mode="conquest">
+              <strong>CONQUEST · MAIN GAME</strong>
+              <span>12분 · 7개 거점 · 기지 건설 · 분대 지휘 · 지휘관 능력 · 성장</span>
+            </button>
             <button class="mode-card ${challengeSelected}" type="button" data-mode="challenge">
               <strong>AI CHALLENGE</strong>
               <span>3분 · 3종 전장 · A/B/C 거점전 · 즉시 빙의 · 100점 선취</span>
@@ -503,9 +713,9 @@ export class Hud {
           </div>
           <div class="feature-row">
             <span>GOD ↔ POSSESSION</span>
-            <span>THREE-POINT FRONTLINE</span>
+            <span>BASE & SQUAD COMMAND</span>
             <span>BRICK DESTRUCTION</span>
-            <span>DYNAMIC BATTLEFIELD</span>
+            <span>ADAPTIVE ENEMY AI</span>
           </div>
           <button class="start-button" type="button">작전 시작</button>
         </div>
@@ -563,6 +773,28 @@ export class Hud {
       });
       this.deployButtons.set(descriptor.kind, button);
       this.deployDock.append(button);
+    }
+  }
+
+  private createCommanderButtons(): void {
+    const hotkeys: CommanderAbilityKind[] = [
+      'artillery',
+      'airstrike',
+      'reinforce',
+      'repair',
+    ];
+    for (const [index, kind] of hotkeys.entries()) {
+      const definition = COMMANDER_ABILITIES[kind];
+      const button = document.createElement('button');
+      button.className = 'commander-button';
+      button.type = 'button';
+      button.title = definition.description;
+      button.innerHTML = `<kbd>${index + 1}</kbd><strong>${definition.label}</strong><small>${definition.cost} SUP</small>`;
+      button.addEventListener('click', () => {
+        this.callbacks.onCommanderAbility(kind);
+      });
+      this.abilityButtons.set(kind, button);
+      this.commanderDock.append(button);
     }
   }
 

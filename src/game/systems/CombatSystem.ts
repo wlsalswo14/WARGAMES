@@ -119,6 +119,43 @@ export class CombatSystem {
     return true;
   }
 
+  strikeArea(
+    position: Vector3,
+    radius: number,
+    damage: number,
+    structureDamage: number,
+    units: Unit[],
+    structures: BrickStructure[],
+    faction: FactionId,
+  ): void {
+    const impulse = new Vector3(0, Math.max(8, damage * 0.035), 0);
+    for (const structure of structures) {
+      const broadRadius = structure.collisionRadius + radius;
+      if (
+        structure.destroyed
+        || structure.root.position.distanceToSquared(position)
+          > broadRadius * broadRadius
+      ) {
+        continue;
+      }
+      structure.damageAt(
+        position,
+        radius,
+        structureDamage,
+        impulse,
+      );
+    }
+    this.explode(
+      position,
+      radius,
+      damage,
+      units,
+      faction,
+      `commander-${faction}`,
+      faction === 'azure',
+    );
+  }
+
   update(
     delta: number,
     units: Unit[],
@@ -240,12 +277,16 @@ export class CombatSystem {
         continue;
       }
       const impulse = projectile.velocity.clone().normalize().multiplyScalar(projectile.damage * 0.055);
+      const fortifiedHeadquarters = structure.root.name.startsWith(
+        'headquarters-',
+      );
       const destroyedBricks = projectile.destroysStructures
+        && !fortifiedHeadquarters
         ? structure.destroyAll(impulse)
         : structure.damageAt(
             projectile.mesh.position,
             Math.max(1.2, projectile.blastRadius),
-            projectile.damage,
+            projectile.damage * (fortifiedHeadquarters ? 0.48 : 1),
             impulse,
           );
       if (destroyedBricks <= 0) {

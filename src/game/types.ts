@@ -5,13 +5,24 @@ export type Relation = 'allied' | 'neutral' | 'hostile';
 export type UnitKind = 'infantry' | 'general' | 'tank' | 'fighter' | 'helicopter' | 'drone';
 export type AttackMode = 'normal' | 'special' | 'suicide';
 export type ProjectileAttackMode = Exclude<AttackMode, 'suicide'>;
+export type ProductionKind =
+  | 'factory'
+  | 'barracks'
+  | 'armorFactory'
+  | 'airfield';
+export type CommanderAbilityKind =
+  | 'artillery'
+  | 'airstrike'
+  | 'reinforce'
+  | 'repair';
+export type FormationType = 'line' | 'wedge' | 'column';
 export type DeployKind =
   | UnitKind
   | 'wall'
   | 'mountain'
   | 'trench'
   | 'building'
-  | 'factory'
+  | ProductionKind
   | 'tree';
 export type GameMode = 'god' | 'possession';
 export type CameraView = 'thirdPerson' | 'firstPerson';
