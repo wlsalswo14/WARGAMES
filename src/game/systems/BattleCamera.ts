@@ -188,7 +188,11 @@ export class BattleCamera {
   private updatePossessionView(delta: number, unit: Unit): void {
     const anchor = unit.position.clone().add(new Vector3(
       0,
-      unit.kind === 'infantry' ? 2 : unit.isAircraft ? 1.8 : 2.9,
+      unit.kind === 'infantry' || unit.kind === 'general'
+        ? 2
+        : unit.isAircraft
+          ? 1.8
+          : 2.9,
       0,
     ));
     const viewPitch = unit.kind === 'fighter'

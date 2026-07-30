@@ -13,6 +13,13 @@ import type { FactionId, UnitKind } from '../types';
 
 const darkMaterial = new MeshStandardMaterial({ color: 0x14202a, roughness: 0.58, metalness: 0.32 });
 const metalMaterial = new MeshStandardMaterial({ color: 0x34414a, roughness: 0.3, metalness: 0.72 });
+const commandGoldMaterial = new MeshStandardMaterial({
+  color: 0xffcf4a,
+  emissive: 0x6e4300,
+  emissiveIntensity: 0.18,
+  roughness: 0.34,
+  metalness: 0.58,
+});
 const glassMaterial = new MeshStandardMaterial({
   color: 0x6dc8ec,
   emissive: 0x17465a,
@@ -93,6 +100,7 @@ function createInfantry(faction: FactionId): Group {
   root.add(head);
 
   const helmet = new Mesh(new SphereGeometry(0.46, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), uniform);
+  helmet.name = 'infantry-helmet';
   helmet.position.y = 2.37;
   helmet.castShadow = true;
   root.add(helmet);
@@ -112,6 +120,73 @@ function createInfantry(faction: FactionId): Group {
   root.userData.muzzleNode = barrel;
   root.userData.aimNode = root;
   root.scale.setScalar(1.15);
+  return root;
+}
+
+function createGeneral(faction: FactionId): Group {
+  const root = createInfantry(faction);
+  const infantryHelmet = root.getObjectByName('infantry-helmet');
+  if (infantryHelmet) {
+    root.remove(infantryHelmet);
+  }
+  const commandUniform = factionMaterial(faction, 0.78);
+  const coat = new Mesh(
+    new BoxGeometry(1.18, 0.9, 0.16),
+    commandUniform,
+  );
+  coat.position.set(0, 1.3, 0.38);
+  coat.castShadow = true;
+  root.add(coat);
+
+  for (const x of [-0.48, 0.48]) {
+    const epaulette = new Mesh(
+      new BoxGeometry(0.28, 0.12, 0.55),
+      commandGoldMaterial,
+    );
+    epaulette.position.set(x, 1.82, 0);
+    epaulette.castShadow = true;
+    root.add(epaulette);
+  }
+  const medal = new Mesh(
+    new BoxGeometry(0.34, 0.22, 0.08),
+    commandGoldMaterial,
+  );
+  medal.position.set(0.28, 1.48, 0.49);
+  root.add(medal);
+
+  const cap = new Mesh(
+    new CylinderGeometry(0.48, 0.54, 0.24, 12),
+    commandUniform,
+  );
+  cap.position.y = 2.57;
+  cap.castShadow = true;
+  root.add(cap);
+  const capBand = new Mesh(
+    new CylinderGeometry(0.5, 0.5, 0.1, 12),
+    commandGoldMaterial,
+  );
+  capBand.position.y = 2.5;
+  root.add(capBand);
+  const brim = new Mesh(
+    new BoxGeometry(0.7, 0.08, 0.34),
+    darkMaterial,
+  );
+  brim.position.set(0, 2.46, 0.3);
+  root.add(brim);
+
+  const flagPole = new Mesh(
+    new CylinderGeometry(0.045, 0.045, 2.6, 8),
+    metalMaterial,
+  );
+  flagPole.position.set(-0.72, 2.18, -0.18);
+  root.add(flagPole);
+  const flag = new Mesh(
+    new BoxGeometry(0.86, 0.54, 0.08),
+    factionMaterial(faction),
+  );
+  flag.position.set(-0.3, 3.08, -0.18);
+  flag.castShadow = true;
+  root.add(flag);
   return root;
 }
 
@@ -288,6 +363,8 @@ export function createUnitModel(kind: UnitKind, faction: FactionId): Group {
   switch (kind) {
     case 'infantry':
       return createInfantry(faction);
+    case 'general':
+      return createGeneral(faction);
     case 'tank':
       return createTank(faction);
     case 'fighter':

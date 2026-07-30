@@ -65,7 +65,13 @@ export class BattleAudio {
       this.noise(0.13, 0.09, 900);
       return;
     }
-    const frequency = kind === 'tank' ? 145 : kind === 'infantry' ? 310 : 220;
+    const frequency = kind === 'tank'
+      ? 145
+      : kind === 'infantry'
+        ? 310
+        : kind === 'general'
+          ? 265
+          : 220;
     this.tone(frequency, 0.055, 'square', 0.035, -80);
   }
 

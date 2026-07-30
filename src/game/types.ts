@@ -2,10 +2,17 @@ import type { Vector3 } from 'three';
 
 export type FactionId = 'azure' | 'crimson' | 'amber';
 export type Relation = 'allied' | 'neutral' | 'hostile';
-export type UnitKind = 'infantry' | 'tank' | 'fighter' | 'helicopter' | 'drone';
+export type UnitKind = 'infantry' | 'general' | 'tank' | 'fighter' | 'helicopter' | 'drone';
 export type AttackMode = 'normal' | 'special' | 'suicide';
 export type ProjectileAttackMode = Exclude<AttackMode, 'suicide'>;
-export type DeployKind = UnitKind | 'wall' | 'mountain' | 'trench' | 'building' | 'tree';
+export type DeployKind =
+  | UnitKind
+  | 'wall'
+  | 'mountain'
+  | 'trench'
+  | 'building'
+  | 'factory'
+  | 'tree';
 export type GameMode = 'god' | 'possession';
 export type CameraView = 'thirdPerson' | 'firstPerson';
 

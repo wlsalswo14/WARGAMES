@@ -138,13 +138,13 @@ export class ChallengeSession {
     }
   }
 
-  recordKill(attacker: FactionId): void {
+  recordKill(attacker: FactionId, score = 2): void {
     if (this.finished || !this.options.activeFactions.includes(attacker)) {
       return;
     }
     this.scores[attacker] = Math.min(
       this.options.scoreLimit,
-      this.scores[attacker] + 2,
+      this.scores[attacker] + Math.max(0, score),
     );
     if (attacker === 'azure') {
       this.kills += 1;

@@ -13,11 +13,11 @@ export function initialSpawnPosition(
   const right = new Vector3(forward.z, 0, -forward.x);
   const origin = new Vector3(base.x, 0, base.z);
 
-  if (kind === 'infantry') {
+  if (kind === 'infantry' || kind === 'general') {
     const row = Math.floor(index / 5);
     const column = index % 5;
     return origin
-      .addScaledVector(forward, 30 + row * 10)
+      .addScaledVector(forward, kind === 'general' ? 20 : 30 + row * 10)
       .addScaledVector(right, (column - 2) * 9);
   }
   if (kind === 'tank') {

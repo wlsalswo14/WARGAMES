@@ -8,4 +8,7 @@ if (!app) {
 }
 
 const game = new BrickWarfare(app);
+if (new URLSearchParams(window.location.search).has('test')) {
+  Reflect.set(window, '__brickWarfare', game);
+}
 game.start();

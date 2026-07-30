@@ -6,7 +6,7 @@ import type { FactionId } from '../types';
 
 export interface StructurePlan {
   id: string;
-  kind: 'building' | 'wall' | 'headquarters';
+  kind: 'building' | 'wall' | 'headquarters' | 'factory';
   x: number;
   z: number;
   width: number;
@@ -75,6 +75,26 @@ export function createPlayerBuildingPlan(
     depth: 9 + Math.floor(Math.random() * 6),
     yaw: yaw + (Math.random() - 0.5) * 0.24,
     color: BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)],
+    openCenter: true,
+    faction,
+  };
+}
+
+export function createProductionBasePlan(
+  point: Vector3,
+  yaw: number,
+  faction: FactionId,
+): StructurePlan {
+  return {
+    id: `production-base-${faction}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    kind: 'factory',
+    x: point.x,
+    z: point.z,
+    width: 10,
+    height: 11,
+    depth: 9,
+    yaw,
+    color: FACTIONS[faction].color,
     openCenter: true,
     faction,
   };

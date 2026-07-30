@@ -41,6 +41,15 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     cost: 60,
     capturePower: 1,
   },
+  general: {
+    maxHealth: 180,
+    speed: 7.2,
+    turnRate: 5.2,
+    range: 58,
+    armor: 22,
+    cost: 240,
+    capturePower: 3,
+  },
   tank: {
     maxHealth: 280,
     speed: 10.2,
@@ -88,6 +97,14 @@ const NORMAL_WEAPONS: Record<UnitKind, WeaponStats> = {
     blastRadius: 0.8,
     destroysStructures: false,
   },
+  general: {
+    reload: 0.32,
+    damage: 18,
+    projectileSpeed: 95,
+    penetration: 28,
+    blastRadius: 0.9,
+    destroysStructures: false,
+  },
   tank: {
     reload: 0.42,
     damage: 12,
@@ -123,6 +140,14 @@ const NORMAL_WEAPONS: Record<UnitKind, WeaponStats> = {
 };
 
 const SPECIAL_WEAPONS: Partial<Record<UnitKind, WeaponStats>> = {
+  general: {
+    reload: 5,
+    damage: 110,
+    projectileSpeed: 72,
+    penetration: 48,
+    blastRadius: 4.5,
+    destroysStructures: false,
+  },
   tank: {
     reload: 7.5,
     damage: 520,

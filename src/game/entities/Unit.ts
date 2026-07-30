@@ -96,8 +96,8 @@ export class Unit {
 
     this.factionMarker = new Mesh(
       new ConeGeometry(
-        this.kind === 'infantry' ? 0.62 : 0.88,
-        this.kind === 'infantry' ? 1.05 : 1.42,
+        this.kind === 'infantry' || this.kind === 'general' ? 0.62 : 0.88,
+        this.kind === 'infantry' || this.kind === 'general' ? 1.05 : 1.42,
         8,
       ),
       new MeshBasicMaterial({
@@ -108,7 +108,7 @@ export class Unit {
       }),
     );
     this.factionMarker.rotation.x = Math.PI;
-    this.factionMarker.position.y = this.kind === 'infantry'
+    this.factionMarker.position.y = this.kind === 'infantry' || this.kind === 'general'
       ? 4.2
       : this.kind === 'tank'
         ? 5.3
@@ -125,6 +125,8 @@ export class Unit {
     switch (this.kind) {
       case 'infantry':
         return 1.1;
+      case 'general':
+        return 1.35;
       case 'tank':
         return 2.8;
       case 'fighter':
@@ -165,6 +167,7 @@ export class Unit {
   get displayName(): string {
     const names: Record<UnitKind, string> = {
       infantry: '보병 분대',
+      general: '전장 지휘관',
       tank: '주력 전차',
       fighter: '전술 전투기',
       helicopter: '공격 헬기',
@@ -176,6 +179,7 @@ export class Unit {
   get specialAttackName(): string {
     const names: Record<UnitKind, string> = {
       infantry: '',
+      general: '지휘 유탄',
       tank: '철갑 주포',
       fighter: '공대지 미사일',
       helicopter: '중형 로켓',
@@ -471,7 +475,10 @@ export class Unit {
         rotors[index].rotation.y += delta * (30 + index * 1.4);
       }
     }
-    if (this.kind === 'infantry' && this.velocity.lengthSq() > 0.5) {
+    if (
+      (this.kind === 'infantry' || this.kind === 'general')
+      && this.velocity.lengthSq() > 0.5
+    ) {
       this.model.position.y = Math.sin(elapsed * 12 + nextUnitId) * 0.06;
     } else {
       this.model.position.y = MathUtils.damp(this.model.position.y, 0, 12, delta);

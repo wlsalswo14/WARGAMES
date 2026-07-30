@@ -47,6 +47,7 @@ const DEPLOYMENTS: Array<{ kind: DeployKind; label: string }> = [
   { kind: 'mountain', label: '산' },
   { kind: 'trench', label: '참호' },
   { kind: 'building', label: '대형 건물' },
+  { kind: 'factory', label: '생산기지' },
   { kind: 'tree', label: '나무' },
 ];
 
@@ -456,12 +457,13 @@ export class Hud {
         <b>1 / 2 / 3</b> 선택 유닛을 A / B / C 거점으로 명령<br />
         <b>우클릭</b> 원하는 위치로 진격 명령<br />
         <b>Enter / 더블클릭</b> 즉시 직접 조종<br />
+        <b>B</b> 점령 거점 생산기지 건설<br />
         거점을 지켜 <b>100점</b>을 먼저 확보
       </div>
       <div class="controls controls-god" data-ui="controls-god">
         <b>마우스</b> 이동 방향으로 시점 · <b>W/S</b> 전후 · <b>A/D</b> 우/좌 · <b>Space/Shift</b> 상승/하강<br />
         ${this.playMode === 'challenge'
-          ? '<b>좌클릭</b> 선택 · <b>1/2/3</b> 거점 명령 · <b>Enter</b> 빙의'
+          ? '<b>좌클릭</b> 선택/건설 · <b>1/2/3</b> 거점 명령 · <b>B</b> 생산기지 · <b>Enter</b> 빙의'
           : '<b>좌클릭</b> 배치/선택 · <b>우클릭</b> 명령 · <b>1~0</b> 도구 · <b>F</b> 진영'}
       </div>
       <div class="controls controls-possession hidden" data-ui="controls-possession">

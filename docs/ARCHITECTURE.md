@@ -28,7 +28,7 @@
 
 - `config.ts`: 진영, 유닛·무기 수치와 전역 성능 한도
 - `types.ts`: 진영, 유닛, 명령, 전투 결과의 공유 타입
-- `battlefield/`: Challenge 고정 전장과 Sandbox 절차적 전장 데이터
+- `battlefield/`: Challenge 고정 전장, Sandbox 절차적 전장, 본부·생산기지 구조 계획
 - `entities/`: 유닛, 거점, 발사체, 파괴 가능한 구조물
 - `world/BattlefieldWorld.ts`: 지형 청크, 영토, 나무, 바람
 - `world/BattlefieldAtmosphere.ts`: 하늘 그라데이션, 태양광과 대기 셰이더
@@ -52,6 +52,7 @@
 - 무기와 피해량: `config.ts`, `CombatSystem.ts`, `Projectile.ts`
 - 장애물 회피: `NavigationSystem.ts`, `UnitCollisionSystem.ts`
 - 거점·승리 규칙: `Outpost.ts`, `ChallengeSession.ts`
+- 생산기지와 증원 상한: `BrickWarfare.ts`, `structurePlans.ts`, `PlayMode.ts`
 - 초기 병력과 맵: `PlayMode.ts`, `battlefield/`
 - 화면 표시: `Hud.ts`, `style.css`
 

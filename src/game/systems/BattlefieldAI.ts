@@ -82,6 +82,18 @@ export class BattlefieldAI {
         continue;
       }
       if (unit.order?.type === 'move') {
+        const visibleTarget = this.findVisibleCombatTarget(
+          unit,
+          units,
+          diplomacy,
+        );
+        if (visibleTarget && unit.canFire('normal')) {
+          const aimPoint = visibleTarget.position.clone().add(
+            new Vector3(0, visibleTarget.collisionRadius * 0.45, 0),
+          );
+          unit.targetId = visibleTarget.id;
+          fire(unit, aimPoint, 'normal');
+        }
         const destination = unit.order.destination.clone();
         if (unit.isAircraft) {
           destination.y = Math.max(
@@ -339,6 +351,10 @@ export class BattlefieldAI {
   private findCombatTarget(unit: Unit, units: Unit[], diplomacy: DiplomacySystem): Unit | null {
     let best: Unit | null = null;
     let bestScore = Number.POSITIVE_INFINITY;
+    let bestVisible: Unit | null = null;
+    let bestVisibleScore = Number.POSITIVE_INFINITY;
+    const engagementDistanceSquared = Math.pow(unit.stats.range * 2.8, 2);
+    const visibleDistanceSquared = unit.stats.range * unit.stats.range;
     for (const candidate of units) {
       if (
         candidate === unit
@@ -349,8 +365,50 @@ export class BattlefieldAI {
       }
       const distanceSq = unit.position.distanceToSquared(candidate.position);
       const airPenalty = !unit.isAircraft && candidate.position.y - unit.position.y > 30 ? 2.2 : 1;
-      const score = distanceSq * airPenalty;
-      if (score < bestScore && score < Math.pow(unit.stats.range * 2.8, 2)) {
+      const commandPriority = candidate.kind === 'general' ? 0.52 : 1;
+      const score = distanceSq * airPenalty * commandPriority;
+      if (
+        distanceSq <= visibleDistanceSquared
+        && this.hasTerrainLineOfSight(unit, candidate)
+        && score < bestVisibleScore
+      ) {
+        bestVisible = candidate;
+        bestVisibleScore = score;
+      }
+      if (score < bestScore && distanceSq < engagementDistanceSquared) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return bestVisible ?? best;
+  }
+
+  private findVisibleCombatTarget(
+    unit: Unit,
+    units: Unit[],
+    diplomacy: DiplomacySystem,
+  ): Unit | null {
+    let best: Unit | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    const maximumDistanceSquared = unit.stats.range * unit.stats.range;
+    for (const candidate of units) {
+      if (
+        candidate === unit
+        || candidate.destroyed
+        || !diplomacy.isHostile(unit.faction, candidate.faction)
+      ) {
+        continue;
+      }
+      const distanceSquared = unit.position.distanceToSquared(candidate.position);
+      if (
+        distanceSquared > maximumDistanceSquared
+        || !this.hasTerrainLineOfSight(unit, candidate)
+      ) {
+        continue;
+      }
+      const commandPriority = candidate.kind === 'general' ? 0.52 : 1;
+      const score = distanceSquared * commandPriority;
+      if (score < bestScore) {
         best = candidate;
         bestScore = score;
       }
@@ -420,6 +478,12 @@ export class BattlefieldAI {
     target: Unit,
     objective: Outpost,
   ): boolean {
+    if (
+      unit.position.distanceTo(target.position) <= unit.stats.range
+      && this.hasTerrainLineOfSight(unit, target)
+    ) {
+      return true;
+    }
     const objectiveDistance = this.horizontalDistance(
       unit.position,
       objective.root.position,
