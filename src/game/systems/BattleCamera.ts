@@ -220,11 +220,13 @@ export class BattleCamera {
         0,
         -horizontalHeading.x,
       );
-      const desired = anchor
+      const sightAnchor = anchor.clone();
+      sightAnchor.y += 2.3;
+      const desired = sightAnchor
         .clone()
-        .addScaledVector(horizontalHeading, -20)
-        .addScaledVector(cameraRight, 3.4);
-      desired.y += 7.5;
+        .addScaledVector(horizontalHeading, -23)
+        .addScaledVector(cameraRight, 6);
+      desired.y += 8.2;
       const stabilizedVertical = clamp(
         flightDirection.y * 0.32 + Math.sin(this.aimPitch) * 0.65,
         -0.48,
@@ -236,7 +238,7 @@ export class BattleCamera {
       stabilizedLook.y = stabilizedVertical;
       this.camera.position.lerp(desired, 1 - Math.exp(-delta * 8));
       this.camera.lookAt(
-        anchor.clone().addScaledVector(stabilizedLook, 38),
+        sightAnchor.clone().addScaledVector(stabilizedLook, 50),
       );
       return;
     }

@@ -137,18 +137,15 @@ export class CombatSystem {
         projectile.alive
         && projectile.mesh.position.y <= terrainHeight(projectile.mesh.position.x, projectile.mesh.position.z) + 0.08
       ) {
+        const impactPosition = projectile.mesh.position.clone();
+        impactPosition.y = terrainHeight(impactPosition.x, impactPosition.z) + 0.08;
         projectile.alive = false;
-        this.createImpact(
-          projectile.mesh.position,
-          projectile.damage > 80 ? 0xff7c31 : 0xffd585,
-          projectile.damage > 80 ? 3.2 : 0.65,
+        this.resolveTerrainImpact(
+          projectile,
+          impactPosition,
+          units,
+          structures,
         );
-        if (projectile.damage > 25) {
-          this.onExplosion(
-            projectile.mesh.position.clone(),
-            Math.max(3.5, projectile.blastRadius),
-          );
-        }
       }
       if (!projectile.alive) {
         this.scene.remove(projectile.mesh);
@@ -272,6 +269,69 @@ export class CombatSystem {
         );
       }
       return;
+    }
+  }
+
+  private resolveTerrainImpact(
+    projectile: Projectile,
+    position: Vector3,
+    units: Unit[],
+    structures: BrickStructure[],
+  ): void {
+    if (projectile.attackMode === 'special' && projectile.blastRadius > 1) {
+      this.explode(
+        position,
+        projectile.blastRadius,
+        projectile.damage * 0.35,
+        units,
+        projectile.faction,
+        projectile.sourceId,
+        projectile.playerControlled,
+      );
+      this.damageStructuresFromBlast(projectile, position, structures);
+      return;
+    }
+
+    this.createImpact(
+      position,
+      projectile.damage > 80 ? 0xff7c31 : 0xffd585,
+      projectile.damage > 80 ? 3.2 : 0.65,
+    );
+    if (projectile.damage > 25) {
+      this.onExplosion(
+        position.clone(),
+        Math.max(3.5, projectile.blastRadius),
+      );
+    }
+  }
+
+  private damageStructuresFromBlast(
+    projectile: Projectile,
+    position: Vector3,
+    structures: BrickStructure[],
+  ): void {
+    const impulse = projectile.velocity
+      .clone()
+      .normalize()
+      .multiplyScalar(projectile.damage * 0.04);
+    const structureDamage = projectile.damage
+      * (projectile.destroysStructures ? 1 : 0.45);
+    for (const structure of structures) {
+      const broadRadius = structure.collisionRadius
+        + projectile.blastRadius;
+      if (
+        structure.destroyed
+        || structure.root.position.distanceToSquared(position)
+          > broadRadius * broadRadius
+      ) {
+        continue;
+      }
+      structure.damageAt(
+        position,
+        projectile.blastRadius,
+        structureDamage,
+        impulse,
+      );
     }
   }
 

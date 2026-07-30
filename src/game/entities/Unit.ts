@@ -196,6 +196,10 @@ export class Unit {
 
   setPossessed(possessed: boolean): void {
     this.possessed = possessed;
+    const showMarker = !this.destroyed
+      && !(possessed && this.kind === 'fighter');
+    this.selectionRing.visible = showMarker;
+    this.factionMarker.visible = showMarker;
     this.selectionRing.scale.setScalar(possessed ? 1.48 : this.selected ? 1.32 : 1);
     (this.selectionRing.material as MeshBasicMaterial).opacity = possessed ? 1 : this.selected ? 1 : 0.42;
   }
