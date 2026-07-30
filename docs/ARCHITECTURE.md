@@ -31,6 +31,7 @@
 - `battlefield/`: Challenge 고정 전장과 Sandbox 절차적 전장 데이터
 - `entities/`: 유닛, 거점, 발사체, 파괴 가능한 구조물
 - `world/BattlefieldWorld.ts`: 지형 청크, 영토, 나무, 바람
+- `world/BattlefieldAtmosphere.ts`: 하늘 그라데이션, 태양광과 대기 셰이더
 - `ui/Hud.ts`: DOM HUD 생성과 상태 표시
 
 ## 프레임 처리 순서

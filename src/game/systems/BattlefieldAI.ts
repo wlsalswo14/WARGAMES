@@ -31,6 +31,7 @@ export class BattlefieldAI {
   private readonly lineEnd = new Vector3();
   private readonly onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void;
   private cacheCleanupTimer = 5;
+  private elapsed = 0;
 
   constructor(
     onStrategy: (faction: FactionId, strategy: Strategy, reason: string) => void,
@@ -51,6 +52,7 @@ export class BattlefieldAI {
     wind: Vector3,
     fire: (unit: Unit, target: Vector3, mode: AttackMode) => void,
   ): void {
+    this.elapsed += delta;
     for (const [faction, priority] of this.priorityObjectives) {
       priority.remaining -= delta;
       if (priority.remaining <= 0) {
@@ -95,17 +97,15 @@ export class BattlefieldAI {
           structures,
         );
         if (distance < (unit.isAircraft ? 9 : 2.5)) {
-          unit.order = { type: 'hold', destination: unit.order.destination.clone() };
+          unit.order = null;
+          this.objectiveAssignments.delete(unit.id);
         }
         continue;
       }
-      if (unit.order?.type === 'hold') {
-        if (!unit.isAircraft) {
-          unit.moveGround(0, 0, delta);
-          continue;
-        }
-      }
-      const objective = this.findObjective(unit, outposts, diplomacy);
+      const holdingPosition = unit.order?.type === 'hold';
+      const objective = holdingPosition
+        ? null
+        : this.findObjective(unit, outposts, diplomacy);
       let target = unit.targetId ? unitsById.get(unit.targetId) ?? null : null;
       if (target && !this.isValidCombatTarget(unit, target, diplomacy)) {
         target = null;
@@ -139,6 +139,8 @@ export class BattlefieldAI {
         unit.faceTarget(target.position, delta);
         const normalReady = unit.canFire('normal');
         const specialReady = unit.kind !== 'infantry' && unit.canFire('special');
+        const hasLineOfSight = distance <= unit.stats.range
+          && this.hasTerrainLineOfSight(unit, target);
         if (
           unit.kind === 'drone'
           && specialReady
@@ -163,7 +165,7 @@ export class BattlefieldAI {
         if (
           distance <= unit.stats.range
           && (normalReady || specialReady)
-          && this.hasTerrainLineOfSight(unit, target)
+          && hasLineOfSight
         ) {
           const aimPoint = target.position.clone().add(
             new Vector3(0, target.collisionRadius * 0.45, 0),
@@ -184,8 +186,14 @@ export class BattlefieldAI {
           );
           continue;
         }
+        if (holdingPosition) {
+          if (!unit.isAircraft) {
+            unit.moveGround(0, 0, delta);
+          }
+          continue;
+        }
         const preferredRange = unit.kind === 'tank' ? unit.stats.range * 0.62 : unit.stats.range * 0.42;
-        if (distance > preferredRange) {
+        if (distance > preferredRange || !hasLineOfSight) {
           const destination = this.addFormationOffset(target.position.clone(), unit, 24);
           if (unit.isAircraft) {
             destination.y += unit.kind === 'fighter' ? 34 : 18;
@@ -206,15 +214,18 @@ export class BattlefieldAI {
           wind,
           structures,
         );
-      } else if (unit.isAircraft) {
-        const patrol = new Vector3(
-          Math.sin(Number.parseInt(unit.id.split('-')[1], 10) * 2.3) * 90,
-          unit.kind === 'fighter' ? 42 : 18,
-          Math.cos(Number.parseInt(unit.id.split('-')[1], 10) * 1.7) * 90,
-        );
-        this.navigation.steer(unit, patrol, delta, wind, structures);
+      } else if (holdingPosition) {
+        if (!unit.isAircraft) {
+          unit.moveGround(0, 0, delta);
+        }
       } else {
-        unit.moveGround(0, 0, delta);
+        this.patrolFriendlyTerritory(
+          unit,
+          outposts,
+          delta,
+          wind,
+          structures,
+        );
       }
     }
   }
@@ -345,6 +356,45 @@ export class BattlefieldAI {
       }
     }
     return best;
+  }
+
+  private patrolFriendlyTerritory(
+    unit: Unit,
+    outposts: Outpost[],
+    delta: number,
+    wind: Vector3,
+    structures: BrickStructure[],
+  ): void {
+    let anchor: Vector3 | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const outpost of outposts) {
+      if (outpost.owner !== unit.faction) {
+        continue;
+      }
+      const distance = unit.position.distanceToSquared(outpost.root.position);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        anchor = outpost.root.position;
+      }
+    }
+    const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
+    const direction = unitNumber % 2 === 0 ? 1 : -1;
+    const angle = unitNumber * Math.PI * (3 - Math.sqrt(5))
+      + this.elapsed * direction * (unit.isAircraft ? 0.16 : 0.1);
+    const radius = unit.isAircraft
+      ? 36 + (unitNumber % 3) * 9
+      : 13 + (unitNumber % 3) * 4;
+    this.scratch.copy(anchor ?? BattlefieldAI.worldCenter);
+    this.scratch.x += Math.cos(angle) * radius;
+    this.scratch.z += Math.sin(angle) * radius;
+    if (unit.isAircraft) {
+      this.scratch.y += unit.kind === 'fighter'
+        ? 38
+        : unit.kind === 'helicopter'
+          ? 18
+          : 13;
+    }
+    this.navigation.steer(unit, this.scratch, delta, wind, structures);
   }
 
   private isValidCombatTarget(
@@ -489,4 +539,6 @@ export class BattlefieldAI {
   private horizontalDistance(left: Vector3, right: Vector3): number {
     return Math.hypot(left.x - right.x, left.z - right.z);
   }
+
+  private static readonly worldCenter = new Vector3();
 }

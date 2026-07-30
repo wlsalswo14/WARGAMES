@@ -11,12 +11,14 @@ import {
 import { FACTIONS } from '../config';
 import type { FactionId, UnitKind } from '../types';
 
-const darkMaterial = new MeshStandardMaterial({ color: 0x14202a, roughness: 0.78, metalness: 0.25 });
-const metalMaterial = new MeshStandardMaterial({ color: 0x34414a, roughness: 0.48, metalness: 0.66 });
+const darkMaterial = new MeshStandardMaterial({ color: 0x14202a, roughness: 0.58, metalness: 0.32 });
+const metalMaterial = new MeshStandardMaterial({ color: 0x34414a, roughness: 0.3, metalness: 0.72 });
 const glassMaterial = new MeshStandardMaterial({
   color: 0x6dc8ec,
-  roughness: 0.2,
-  metalness: 0.1,
+  emissive: 0x17465a,
+  emissiveIntensity: 0.12,
+  roughness: 0.12,
+  metalness: 0.18,
   transparent: true,
   opacity: 0.72,
 });
@@ -25,9 +27,9 @@ function factionMaterial(faction: FactionId, shade = 1): MeshStandardMaterial {
   const material = new MeshStandardMaterial({
     color: FACTIONS[faction].color,
     emissive: FACTIONS[faction].color,
-    emissiveIntensity: 0.16,
-    roughness: 0.64,
-    metalness: 0.18,
+    emissiveIntensity: 0.07,
+    roughness: 0.4,
+    metalness: 0.1,
   });
   material.color.multiplyScalar(shade);
   return material;

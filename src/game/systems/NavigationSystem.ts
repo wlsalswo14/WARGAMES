@@ -4,10 +4,10 @@ import type { Unit } from '../entities/Unit';
 
 interface MovementProgress {
   lastPosition: Vector3;
-  lastYaw: number;
   stationaryTime: number;
   escapeTarget: Vector3 | null;
   escapeTime: number;
+  escapeAttempt: number;
 }
 
 export class NavigationSystem {
@@ -48,7 +48,12 @@ export class NavigationSystem {
     ) {
       progress.stationaryTime = 0;
       progress.escapeTime = 1.6;
-      progress.escapeTarget = this.createEscapeTarget(unit, destination);
+      progress.escapeAttempt += 1;
+      progress.escapeTarget = this.createEscapeTarget(
+        unit,
+        destination,
+        progress.escapeAttempt,
+      );
       steeringTarget = progress.escapeTarget;
     }
     unit.steerToward(steeringTarget, delta, wind);
@@ -70,10 +75,10 @@ export class NavigationSystem {
     }
     const created: MovementProgress = {
       lastPosition: unit.position.clone(),
-      lastYaw: unit.yaw,
       stationaryTime: 0,
       escapeTarget: null,
       escapeTime: 0,
+      escapeAttempt: 0,
     };
     this.progress.set(unit.id, created);
     return created;
@@ -86,10 +91,8 @@ export class NavigationSystem {
     delta: number,
   ): void {
     const movement = unit.position.distanceTo(progress.lastPosition);
-    const rotation = Math.abs(unit.yaw - progress.lastYaw);
     if (
       movement < Math.max(0.025, unit.stats.speed * delta * 0.035)
-      && rotation < 0.02
       && directDistance > Math.max(8, unit.collisionRadius * 3)
     ) {
       progress.stationaryTime += delta;
@@ -97,7 +100,6 @@ export class NavigationSystem {
       progress.stationaryTime = Math.max(0, progress.stationaryTime - delta * 2);
     }
     progress.lastPosition.copy(unit.position);
-    progress.lastYaw = unit.yaw;
   }
 
   private findDetour(
@@ -140,7 +142,11 @@ export class NavigationSystem {
     return closestDetour;
   }
 
-  private createEscapeTarget(unit: Unit, destination: Vector3): Vector3 {
+  private createEscapeTarget(
+    unit: Unit,
+    destination: Vector3,
+    escapeAttempt: number,
+  ): Vector3 {
     const forward = destination.clone().sub(unit.position);
     forward.y = 0;
     if (forward.lengthSq() < 0.01) {
@@ -149,12 +155,12 @@ export class NavigationSystem {
       forward.normalize();
     }
     const unitNumber = Number.parseInt(unit.id.split('-')[1], 10) || 0;
-    const side = unitNumber % 2 === 0 ? 1 : -1;
+    const side = (unitNumber + escapeAttempt) % 2 === 0 ? 1 : -1;
     const lateral = new Vector3(forward.z, 0, -forward.x).multiplyScalar(
-      side * Math.max(8, unit.collisionRadius * 3.5),
+      side * Math.max(8, unit.collisionRadius * (3.2 + escapeAttempt % 3)),
     );
     return unit.position.clone()
-      .addScaledVector(forward, 4)
+      .addScaledVector(forward, 5 + escapeAttempt % 4)
       .add(lateral);
   }
 }

@@ -218,10 +218,6 @@ export class Unit {
     if (!this.isAircraft) {
       const ground = terrainHeight(this.position.x, this.position.z);
       this.position.y = MathUtils.damp(this.position.y, ground, 18, delta);
-      const trenchDepth = ground < -1.8;
-      if (this.kind === 'tank' && !this.possessed && trenchDepth && this.velocity.length() < 5) {
-        this.immobilizedTimer = Math.max(this.immobilizedTimer, 0.8);
-      }
     }
   }
 
@@ -230,7 +226,11 @@ export class Unit {
       this.velocity.multiplyScalar(Math.pow(0.08, delta));
       return;
     }
-    const maxSpeed = this.stats.speed * (forwardInput < 0 ? 0.52 : 1);
+    const inDeepTerrain = terrainHeight(this.position.x, this.position.z) < -1.8;
+    const terrainSpeedScale = this.kind === 'tank' && inDeepTerrain ? 0.5 : 1;
+    const maxSpeed = this.stats.speed
+      * (forwardInput < 0 ? 0.52 : 1)
+      * terrainSpeedScale;
     this.throttle = MathUtils.damp(this.throttle, forwardInput, 4.2, delta);
     this.yaw += turnInput * this.stats.turnRate * delta * (0.35 + Math.abs(this.throttle) * 0.65);
     const forward = flatForward(this.yaw);
