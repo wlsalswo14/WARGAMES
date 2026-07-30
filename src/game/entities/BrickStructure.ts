@@ -65,9 +65,9 @@ export class BrickStructure {
     this.root.position.copy(position);
     this.root.userData.entity = this;
     const materialPalette = [
-      new MeshStandardMaterial({ color, roughness: 0.72 }),
-      new MeshStandardMaterial({ color: color + 0x090704, roughness: 0.77 }),
-      new MeshStandardMaterial({ color: Math.max(0, color - 0x0c0a07), roughness: 0.82 }),
+      new MeshStandardMaterial({ color, roughness: 0.88 }),
+      new MeshStandardMaterial({ color: color + 0x090704, roughness: 0.9 }),
+      new MeshStandardMaterial({ color: Math.max(0, color - 0x0c0a07), roughness: 0.92 }),
     ];
     const brickGeometry = new BoxGeometry(1.9, 0.72, 0.92);
     const descriptors: Array<{

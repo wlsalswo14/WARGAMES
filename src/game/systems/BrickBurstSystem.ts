@@ -176,9 +176,9 @@ export class BrickBurstSystem {
       material = new MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.05,
-        roughness: 0.56,
-        metalness: 0.09,
+        emissiveIntensity: 0.08,
+        roughness: 0.72,
+        metalness: 0.12,
       });
       this.materialCache.set(color, material);
     }

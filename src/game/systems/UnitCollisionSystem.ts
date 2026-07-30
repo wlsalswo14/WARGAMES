@@ -115,25 +115,6 @@ export class UnitCollisionSystem {
         this.crashedAircraft.add(unit);
         continue;
       }
-      for (const other of units) {
-        if (
-          other === unit
-          || other.destroyed
-          || other.faction === unit.faction
-        ) {
-          continue;
-        }
-        const collisionRadius = (
-          unit.collisionRadius + other.collisionRadius
-        ) * 0.78;
-        if (
-          unit.position.distanceToSquared(other.position)
-            <= collisionRadius * collisionRadius
-        ) {
-          this.crashedAircraft.add(unit);
-          break;
-        }
-      }
     }
     for (const unit of this.crashedAircraft) {
       unit.applyRawDamage(unit.health, unit.faction);

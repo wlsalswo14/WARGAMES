@@ -72,7 +72,6 @@ export class BattlefieldWorld {
   private readonly territories: TerritoryInfluence[] = [];
   private readonly lowColor: Color;
   private readonly highColor: Color;
-  private readonly rockColor: Color;
   private readonly riverBankColor: Color;
   private readonly factionColors = new Map<FactionId, Color>(
     (Object.keys(FACTIONS) as FactionId[]).map((faction) => [
@@ -82,7 +81,7 @@ export class BattlefieldWorld {
   );
   private readonly terrainMaterial = new MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.84,
+    roughness: 0.92,
     metalness: 0,
   });
   private readonly trunkMaterial = new MeshStandardMaterial({ color: 0x4b3523, roughness: 1 });
@@ -99,7 +98,6 @@ export class BattlefieldWorld {
     configureTerrainProfile(terrainProfile);
     this.lowColor = new Color(palette.low);
     this.highColor = new Color(palette.high);
-    this.rockColor = new Color(palette.high).lerp(new Color(0x8b867b), 0.52);
     this.riverBankColor = new Color(palette.riverBank);
     this.root.name = 'Procedural Battlefield';
     this.createRiver();
@@ -326,8 +324,8 @@ export class BattlefieldWorld {
       const height = terrainHeight(worldX, worldZ);
       positions.setY(index, height);
     }
-    geometry.computeVertexNormals();
     this.applyTerrainColors(geometry, centerX, centerZ);
+    geometry.computeVertexNormals();
 
     const terrain = new Mesh(geometry, this.terrainMaterial);
     terrain.receiveShadow = true;
@@ -351,7 +349,6 @@ export class BattlefieldWorld {
     centerZ: number,
   ): void {
     const positions = geometry.getAttribute('position');
-    const normals = geometry.getAttribute('normal');
     const colors: number[] = [];
     for (let index = 0; index < positions.count; index += 1) {
       const worldX = centerX + positions.getX(index);
@@ -383,10 +380,6 @@ export class BattlefieldWorld {
           strongestInfluence * 0.72,
         );
       }
-      const slope = normals
-        ? Math.min(1, Math.max(0, (1 - normals.getY(index)) * 2.8))
-        : 0;
-      color.lerp(this.rockColor, slope * 0.42);
       const variation = 0.88 + hash2(Math.round(worldX), Math.round(worldZ), 23) * 0.18;
       color.multiplyScalar(variation);
       colors.push(color.r, color.g, color.b);
@@ -489,10 +482,8 @@ export class BattlefieldWorld {
       geometry,
       new MeshStandardMaterial({
         color: 0x2d6f86,
-        emissive: 0x123843,
-        emissiveIntensity: 0.16,
-        roughness: 0.1,
-        metalness: 0.18,
+        roughness: 0.18,
+        metalness: 0.08,
         transparent: true,
         opacity: 0.78,
         side: DoubleSide,

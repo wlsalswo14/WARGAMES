@@ -75,7 +75,6 @@ import type {
   UnitKind,
 } from './types';
 import { Hud } from './ui/Hud';
-import { BattlefieldAtmosphere } from './world/BattlefieldAtmosphere';
 import { BattlefieldWorld } from './world/BattlefieldWorld';
 
 const FORWARD_KEYS = ['KeyW', 'ArrowUp'] as const;
@@ -97,26 +96,9 @@ interface ProductionBasePlacement {
   spawnAnchor: Vector3;
 }
 
-function detectSoftwareRenderer(): boolean {
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
-  if (!context) {
-    return true;
-  }
-  const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
-    UNMASKED_RENDERER_WEBGL: number;
-  } | null;
-  const rendererName = debugInfo
-    ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
-    : '';
-  context.getExtension('WEBGL_lose_context')?.loseContext();
-  return /swiftshader|llvmpipe|software|basic render/i.test(rendererName);
-}
-
 export class BrickWarfare {
   private readonly shell: HTMLDivElement;
   private readonly renderer: WebGLRenderer;
-  private readonly atmosphere = new BattlefieldAtmosphere();
   private readonly softwareRendering: boolean;
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(55, 1, 0.1, 2200);
@@ -208,9 +190,8 @@ export class BrickWarfare {
     this.shell.className = 'game-shell';
     container.append(this.shell);
 
-    this.softwareRendering = detectSoftwareRenderer();
     this.renderer = new WebGLRenderer({
-      antialias: !this.softwareRendering,
+      antialias: this.playMode === 'sandbox',
       powerPreference: 'high-performance',
     });
     this.renderer.domElement.className = 'game-canvas';
@@ -219,12 +200,12 @@ export class BrickWarfare {
     this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.08;
+    this.softwareRendering = this.detectSoftwareRendering();
     this.shell.append(this.renderer.domElement);
 
-    this.scene.background = new Color(0x94b2bd);
-    this.scene.fog = new Fog(0x94b2bd, 205, 720);
-    this.scene.add(this.atmosphere.mesh);
+    this.scene.background = new Color(0x91afbd);
+    this.scene.fog = new Fog(0x91afbd, 210, 760);
     this.scene.add(this.world.root);
     this.setupLighting();
     if (this.playMode === 'challenge' && this.challengeFormat === 'triple') {
@@ -352,10 +333,10 @@ export class BrickWarfare {
   }
 
   private setupLighting(): void {
-    const hemisphere = new HemisphereLight(0xccecff, 0x29372d, 1.28);
+    const hemisphere = new HemisphereLight(0xc9e7f2, 0x30352b, 1.65);
     this.scene.add(hemisphere);
-    this.scene.add(new AmbientLight(0x82959d, 0.2));
-    const sun = new DirectionalLight(0xffe8c5, 3.45);
+    this.scene.add(new AmbientLight(0x8aa0a8, 0.38));
+    const sun = new DirectionalLight(0xfff0d4, 3.1);
     sun.position.set(-170, 240, 95);
     sun.castShadow = this.playMode === 'sandbox';
     sun.shadow.mapSize.set(1024, 1024);
@@ -521,7 +502,6 @@ export class BrickWarfare {
         ? this.possessedUnit.position
         : this.battleCamera.godPosition,
     );
-    this.atmosphere.update(this.camera.position);
     this.updateHud(delta);
     this.audio.update(
       wallDelta,
@@ -1823,6 +1803,18 @@ export class BrickWarfare {
       : (this.playMode === 'challenge' ? 1 : 1.25);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maximumPixelRatio));
     this.renderer.setSize(width, height, false);
+  }
+
+  private detectSoftwareRendering(): boolean {
+    const context = this.renderer.getContext();
+    const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
+      UNMASKED_RENDERER_WEBGL: number;
+    } | null;
+    if (!debugInfo) {
+      return false;
+    }
+    const rendererName = String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+    return /swiftshader|llvmpipe|software|basic render/i.test(rendererName);
   }
 
   private strategyLabel(strategy: string): string {

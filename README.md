@@ -83,10 +83,9 @@ God Mode에서 세 거점을 지휘하다가 결정적인 순간 아군 유닛�
 - **Command general:** 진영별 장군 1명은 높은 체력·장갑·점령력과 지휘 유탄을 보유하며 제거 시 12점 제공
 - **Forward production:** 점령 거점당 생산기지 1개를 직접 건설해 진영 병력 상한을 최대 2기 확장
 - **Active patrol:** 점령 목표가 사라져도 아군 거점 주변을 순찰하고, 막히면 좌우 탈출 경로를 번갈아 재계산
-- **Procedural atmosphere:** 코드 생성 하늘 그라데이션·태양광·거리 안개와 경사면 암석색
-- **LEGO material pass:** 플라스틱·금속·유리·물·블록 파편의 반사 특성을 병과와 재질에 맞게 구분
 - **Dual weapons:** 보병 외 유닛은 빠른 일반공격과 느리지만 강력한 특수공격 사용
 - **Drone strike:** 드론은 사격과 충돌 자폭을 모두 사용
+- **Safe unit contact:** 일반 유닛끼리 충돌해도 파괴되지 않으며 자폭드론만 충돌 폭발 가능
 - **Brick destruction:** 유닛·나무·구조물이 실제로 파괴될 때만 블록 파편 생성
 - **Structure collapse:** 하부 지지 블록이 무너지면 상부 블록 연쇄 붕괴
 - **Straight projectiles:** 모든 탄환과 폭탄은 조준 방향으로 직선 비행
@@ -142,7 +141,7 @@ src/
 ## 성능 설계
 
 - Challenge 실시간 그림자 비활성화
-- 하드웨어 WebGL 안티앨리어싱 활성화, 소프트웨어 렌더러에서는 자동 비활성화
+- Challenge 그림자와 안티앨리어싱 비활성화
 - Challenge AI 15 Hz, HUD 5 Hz, 거점 판정 10 Hz
 - 구조물 블록을 재질별 `InstancedMesh`로 렌더링
 - 진영별 기본 병력 10기, 생산기지 가동 시 최대 12기

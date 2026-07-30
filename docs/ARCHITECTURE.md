@@ -14,7 +14,7 @@
 | --- | --- |
 | `systems/GameLoop.ts` | 프레임 예약과 멈춤 감시 |
 | `systems/BattleCamera.ts` | God Mode 이동·회전, 빙의 시점, 1·3인칭, 폭발 카메라 |
-| `systems/UnitCollisionSystem.ts` | 드론 충돌, 항공기 추락, 구조물 관통 방지 |
+| `systems/UnitCollisionSystem.ts` | 자폭드론 충돌, 항공기 지형 추락, 구조물 관통 방지 |
 | `systems/CombatSystem.ts` | 발사체 생성·갱신, 피해와 폭발 |
 | `systems/BattlefieldAI.ts` | 유닛 목표 선정과 전술 행동 |
 | `systems/NavigationSystem.ts` | 구조물 회피와 이동 경로 보정 |
@@ -31,7 +31,6 @@
 - `battlefield/`: Challenge 고정 전장, Sandbox 절차적 전장, 본부·생산기지 구조 계획
 - `entities/`: 유닛, 거점, 발사체, 파괴 가능한 구조물
 - `world/BattlefieldWorld.ts`: 지형 청크, 영토, 나무, 바람
-- `world/BattlefieldAtmosphere.ts`: 하늘 그라데이션, 태양광과 대기 셰이더
 - `ui/Hud.ts`: DOM HUD 생성과 상태 표시
 
 ## 프레임 처리 순서
